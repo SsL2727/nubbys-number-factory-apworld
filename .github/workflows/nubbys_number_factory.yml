@@ -12,7 +12,7 @@ jobs:
       - name: Trigger Remote Fuzzer
         run: |
           curl -sSN -f -X POST https://fuzzer.lonlonlabs.dev/api/fuzz \
-               -H "x-api-key: ${{ secrets.ap-412e8f4a379141f487560dd29ba54e96}}" \
+               -H "x-api-key: ${{ secrets.FUZZER_API_KEY }}" \
                -H "Content-Type: application/json" \
                -d '{
                  "repo_url": "https://github.com/SsL2727/nubbys-number-factory-apworld",
