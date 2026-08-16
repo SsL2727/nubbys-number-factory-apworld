@@ -1,0 +1,22 @@
+name: fuzzer
+on:
+  push:
+    branches: master
+  pull_request: 
+    branches: master
+  workflow_dispatch:
+jobs:
+  fuzz-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Remote Fuzzer
+        run: |
+          curl -sSN -f -X POST https://fuzzer.lonlonlabs.dev/api/fuzz \
+               -H "x-api-key: ${{ secrets.FUZZER_API_KEY }}" \
+               -H "Content-Type: application/json" \
+               -d '{
+                 "repo_url": "https://github.com/SsL2727/nubbys-number-factory-apworld",
+                 "apworld_name": "nubbys_number_factory",
+                 "branch": "${{ github.ref_name }}",
+                 "runs": 1000
+               }'
