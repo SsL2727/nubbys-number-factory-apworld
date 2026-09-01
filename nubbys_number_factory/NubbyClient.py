@@ -54,6 +54,13 @@ SAVE_DIR = os.path.join(os.environ.get("LOCALAPPDATA", ""), "NNF_FullVersion")
 BASE_ID = 6_900_000
 POLL_INTERVAL = 2.0
 
+# Restock-count milestone thresholds ("points system") - mirrors
+# locations.py's RESTOCK_THRESHOLDS exactly (hardcoded here too, same
+# self-contained reasoning as every other table in this file - this client
+# runs standalone, no relative imports into the apworld package).
+RESTOCK_THRESHOLDS = [1, 2, 5, 10, 50, 100, 500, 1000, 2000, 3000, 4000, 5000,
+                      6000, 7000, 8000, 9000, 9999]
+
 # AP item code -> internal game item id (matches items.py's ITEM_ITEMS game_id
 # field). Hardcoded so no import can break it.
 _ID_MAP = {
@@ -69,82 +76,31 @@ _ID_MAP = {
     6902054: 46, 6902055: 50, 6902056: 129, 6902057: 136, 6902058: 148, 6902059: 179,
     6902060: 1, 6902061: 13, 6902062: 18, 6902063: 38, 6902064: 61, 6902065: 137,
     6902066: 138, 6902067: 19, 6902068: 146,
-    6902069: 57, 6902070: 26,  # Professor Palmy, Test Item 2 (restored cut content)
-}
-# Reverse lookup, for recognizing entries in A_BoughtItems as real AP items.
-_GAME_ID_TO_AP_ITEM = {v: k for k, v in _ID_MAP.items()}
-
-# game_id -> which of the 3 shops it's flavored for (mirrors items.py's
-# ITEM_ITEMS "shop" field - hardcoded here for the same reason as _ID_MAP,
-# so the client never depends on importing the apworld package). Used only
-# for the per-shop AP-item purchase cap (see SHOP_PURCHASE_CAP below) -
-# perks aren't shop-flavored, so they're not part of this lookup at all.
-_GAME_ID_TO_SHOP = {
-    0: "normal", 2: "normal", 3: "normal", 5: "normal", 9: "normal", 10: "normal",
-    11: "normal", 12: "normal", 14: "normal", 16: "normal", 17: "normal", 21: "normal",
-    22: "normal", 23: "normal", 24: "normal", 30: "normal", 33: "normal", 35: "normal",
-    37: "normal", 40: "normal", 41: "normal", 44: "normal", 48: "normal", 55: "normal",
-    65: "normal", 67: "normal", 149: "normal", 4: "normal", 8: "normal", 20: "normal",
-    29: "normal", 31: "normal", 52: "normal", 53: "normal", 56: "normal", 32: "normal",
-    59: "normal", 57: "normal", 26: "normal",
-    6: "black_market", 27: "black_market", 34: "black_market", 43: "black_market",
-    47: "black_market", 51: "black_market", 60: "black_market", 66: "black_market",
-    15: "black_market", 42: "black_market", 49: "black_market", 54: "black_market",
-    58: "black_market", 151: "black_market",
-    7: "cafe", 36: "cafe", 45: "cafe", 46: "cafe", 50: "cafe", 129: "cafe",
-    136: "cafe", 148: "cafe", 179: "cafe", 1: "cafe", 13: "cafe", 18: "cafe",
-    38: "cafe", 61: "cafe", 137: "cafe", 138: "cafe", 19: "cafe", 146: "cafe",
-}
-
-# game_id -> AP classification, for the tier-sprite feature (see
-# AP_ITEM_TIER_FILE below). Mirrors items.py's ITEM_ITEMS classification
-# field - hardcoded, same self-contained reasoning as _ID_MAP/_GAME_ID_TO_SHOP.
-# Listed explicitly since they're the minority; everything else defaults
-# to "useful" (matches items.py: the vast majority of shop items are).
-_FILLER_GAME_IDS = {0, 14, 16, 22, 24, 37, 65, 129, 148}
-_PROGRESSION_GAME_IDS = {32, 19, 146}
-
-
-def _item_classification(game_id):
-    if game_id in _PROGRESSION_GAME_IDS:
-        return "progression"
-    if game_id in _FILLER_GAME_IDS:
-        return "filler"
-    return "useful"
-
-
-# Cap on AP item PURCHASES per shop flavor (Normal/Black Market/Cafe each
-# get their own count) - the item stays in its single dedicated slot (no
-# change to where/how it's offered), this only limits how many times a
-# player can buy one per shop before that shop's flavor stops being
-# offered through the slot (falls back to the other shops/perks, or a
-# real random item if every flavor + perks are exhausted/capped).
-SHOP_PURCHASE_CAP = 5
-
-# perk_id -> (display name, AP classification word), matching items.py's
-# PERK_ITEMS exactly. Perks are sent through the same AP Item slot as shop
-# items (not detected via chest pickups) - "add those checks as more ap
-# items in the shop" instead of a separate obtain-from-chest trigger.
-_AP_PERK_CATALOG = {
-    1: ("Snake Eyes", "useful"), 3: ("Ray Gun", "useful"), 4: ("Speedy", "useful"),
-    5: ("Battery", "progression"), 6: ("Cheesy", "useful"), 7: ("Waffle", "useful"),
-    8: ("Chaotic", "useful"), 9: ("Zombie", "useful"), 10: ("Springy", "useful"),
-    12: ("Mystery Box", "useful"), 13: ("Trophy", "useful"), 14: ("Penny", "progression"),
-    15: ("Meaty", "useful"), 16: ("Cubey", "useful"), 17: ("Charity", "useful"),
-    18: ("Candle", "useful"), 19: ("Tornado", "useful"), 20: ("Drainer", "useful"),
-    21: ("Card Tower", "useful"), 22: ("Eggy", "useful"), 23: ("Buckshot", "useful"),
-    24: ("Void", "useful"), 25: ("Enlightened", "progression"), 26: ("Archaic", "useful"),
-    27: ("Warlock", "useful"), 28: ("Gourmet", "useful"), 29: ("Lunar", "useful"),
+    # 6902069: 57, 6902070: 26,  # DISABLED (kept for later re-wiring, not deleted) - was: Professor Palmy, Test Item 2 (restored cut content)
 }
 
 # The dedicated "AP Item" shop slot: game_id 181 (obj_I_HairyFingore) is a
-# real, standalone item object that's otherwise unused (its "evil" trigger
-# effect only fires under global.GameMode == 1, a special mode this
-# randomizer never uses, so it's inert if actually bought/held). Buying any
-# *regular* item never sends a check anymore - only this one does, cycling
-# through the still-unchecked "AP Item Purchase" locations one at a time.
-# Purchasing it is a single click (the GML patch writes ITEM_PURCHASED_SIGNAL_FILE
-# directly, no board placement, no inventory entry - see _consume_ap_item_purchase_signal.
+# REAL, complete vanilla item object - NOT dead/unused content (confirmed
+# via decompile: it has its own Create_0/Alarm_0, a real ItemTrig[] effect,
+# and (like every other item) is a normal InItemPool/ItemTier candidate -
+# only its GML *effect* is gated behind global.GameMode == 1, which this
+# randomizer never sets. That means the game's own random shop draws CAN
+# roll it into a completely ordinary, non-AP slot on their own - and since
+# the AP GML patch renames ItemID[181]/ItemDesc[181] globally (see
+# giveItemPatch in the master .csx) whenever the AP slot is active, such a
+# coincidental normal roll would ALSO show the "AP: Archipelago Check"
+# flavor text and (via the V11 single-click-purchase patch, which keys off
+# a cell's OfferHeldItem == 181 with no per-slot distinction) behave
+# exactly like the real AP slot when clicked - a real, reported bug
+# ("sometimes when buying the item that is supposed to be an ap item, I
+# would get a scary finger in my inventory"). Fixed on the GML side (see
+# the master .csx's V54 section) by permanently excluding game_id 181 from
+# every normal shop restock's InItemPool, in addition to this file's own
+# picking logic never assigning any OTHER game_id to the dedicated slot -
+# 181 is now used exclusively as the AP flavor marker, never as a real
+# purchasable roll. Purchasing it is a single click (the GML patch writes
+# ITEM_PURCHASED_SIGNAL_FILE directly, no board placement, no inventory
+# entry - see _consume_ap_item_purchase_signal).
 ITEM_POOL_FILE = os.path.join(SAVE_FOLDER, "ap_item_pool.txt")
 AP_ITEM_NAME_FILE = os.path.join(SAVE_FOLDER, "ap_item_name.txt")
 ITEM_PURCHASED_SIGNAL_FILE = os.path.join(SAVE_FOLDER, "ap_item_purchased.txt")
@@ -157,18 +113,19 @@ ITEM_PURCHASED_SIGNAL_FILE = os.path.join(SAVE_FOLDER, "ap_item_purchased.txt")
 # isn't a full reveal, and the user asked for this specifically.
 AP_ITEM_TIER_FILE = os.path.join(SAVE_FOLDER, "ap_item_tier.txt")
 
-# Sphere-based shops (optional): presence of the flag file tells the game
-# mod to restrict the Normal Shop's pool at its 14 fixed checkpoint rounds;
-# the numbered files list which game_ids belong to each of the 3 Common-
-# tier groups (sent once via slot_data on connect - see NNFOptions.sphere_
-# based_shops). Rare/Ultra Rare aren't split into their own files - the
-# game mod treats "no sphere file matched this round" as its own signal to
-# open up everything non-Common instead.
-SPHERE_SHOPS_FLAG_FILE = os.path.join(SAVE_FOLDER, "ap_sphere_shops.txt")
-SPHERE_ITEM_FILES = {
-    1: os.path.join(SAVE_FOLDER, "ap_sphere1_items.txt"),
-    2: os.path.join(SAVE_FOLDER, "ap_sphere2_items.txt"),
-    3: os.path.join(SAVE_FOLDER, "ap_sphere3_items.txt"),
+# Zone-based shops (optional, replaces the old sphere-based system):
+# presence of the flag file tells the game mod to restrict the Normal
+# Shop's pool by global.Zone (1-4); the numbered files list which game_ids
+# belong to each zone's equal-split group (sent once via slot_data on
+# connect - see NNFOptions.zone_based_shops). Zone 5 (round 81+, endless)
+# has no file at all - the game mod treats "current zone is 5" as its own
+# signal to leave every AP-tracked item unrestricted.
+ZONE_SHOPS_FLAG_FILE = os.path.join(SAVE_FOLDER, "ap_zone_shops.txt")
+ZONE_ITEM_FILES = {
+    1: os.path.join(SAVE_FOLDER, "ap_zoneshop1_items.txt"),
+    2: os.path.join(SAVE_FOLDER, "ap_zoneshop2_items.txt"),
+    3: os.path.join(SAVE_FOLDER, "ap_zoneshop3_items.txt"),
+    4: os.path.join(SAVE_FOLDER, "ap_zoneshop4_items.txt"),
 }
 
 # Zone locks (optional): ZONE_LOCK_FLAG_FILE's presence tells the game mod
@@ -199,7 +156,7 @@ ZONE_UNLOCK_FILES = {
 # default (including for anyone who's never touched AP at all - no
 # NubbyAP folder, no files, nothing blocked, exactly vanilla behavior).
 # Deliberately the same "presence = restriction" direction as every other
-# flag file in this module (SPHERE_SHOPS_FLAG_FILE, ZONE_LOCK_FLAG_FILE,
+# flag file in this module (ZONE_SHOPS_FLAG_FILE, ZONE_LOCK_FLAG_FILE,
 # ITEM_POOL_FILE, ...) rather than "presence = allowed" - that inverted
 # design was tried first and rejected: it would leave every feature
 # blocked by default for a player who's never connected to AP at all,
@@ -251,6 +208,18 @@ SCORE_STATE_FILE_NAME = "score_state.json"
 # a single-slot signal so a burst of several traps received close together
 # can't overwrite/lose each other before the game gets a chance to read them.
 TRAP_QUEUE_FILE = os.path.join(SAVE_FOLDER, "ap_traps_pending.txt")
+# Permanent money/lives/jumbles/rarity bonuses used to only take effect on
+# the NEXT run (obj_LvlMGMT_Create_0 reads the cumulative ap_bonus.txt
+# total once, at run start) - a real report confirmed this read as "the
+# item only activates on subsequent runs, not the one it's acquired in".
+# BONUS_DELTA_FILE is a separate, one-shot APPEND queue (same shape as
+# TRAP_QUEUE_FILE) carrying just the newly-received amount, applied
+# immediately to whatever run is currently in progress (if any) and then
+# cleared - entirely separate from ap_bonus.txt's cumulative total, which
+# still drives every future run's baseline exactly as before. Both get
+# written on every delivery; this one is just the "also do it right now"
+# half.
+BONUS_DELTA_FILE = os.path.join(SAVE_FOLDER, "ap_bonus_delta.txt")
 TRAP_AP_ID_TO_CODE = {
     BASE_ID + 7000: "item_steal",
     BASE_ID + 7001: "coin_theft",
@@ -279,6 +248,10 @@ AP_LOG_MAX_LINES = 40
 # game mod reads. Matches items.py's PERK_ITEMS exactly.
 PERK_ID_SET = {1, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 14, 15, 16, 17, 18, 19,
                 20, 21, 22, 23, 24, 25, 26, 27, 28, 29}
+# DISABLED (kept for later re-wiring, not deleted) - add ", 33, 34, 35,
+# 36, 37, 38" to the set above (six restored demo-exclusive perks) to
+# re-enable, and also widen the ReceivedItems range check below from
+# "+ 29" back to "+ 38".
 PERK_POOL_FILE = os.path.join(SAVE_FOLDER, "ap_perk_pool.txt")
 
 # Permanent starting-money/starting-lives bonuses (filler items). These
@@ -287,31 +260,112 @@ PERK_POOL_FILE = os.path.join(SAVE_FOLDER, "ap_perk_pool.txt")
 BONUS_FILE = os.path.join(SAVE_FOLDER, "ap_bonus.txt")
 
 
+_GM_JSON_RETRIES = 8
+_GM_JSON_RETRY_DELAY = 0.1
+
+
 def _read_gm_json(path):
-    """Read a GameMaker buffer_string JSON save file (null-terminated string)."""
-    with open(path, "rb") as f:
-        data = f.read()
-    if data and data[-1] == 0:
-        data = data[:-1]
-    return json.loads(data.decode("utf-8"))
+    """
+    Read a GameMaker buffer_string JSON save file (null-terminated string).
+    Retries briefly on failure - the game process itself writes these same
+    files (autosave, room transitions, etc.), so a plain single-shot open
+    can lose a race against it on Windows (a sharing violation, or a
+    genuinely torn/mid-write read that fails JSON parsing) at the exact
+    moment a delivery function tries to apply a grant. Every caller here
+    (deliver_supervisor, deliver_tony_skin, etc.) already treats a raised
+    exception as "silently drop this grant, log it, move on" - which is
+    exactly the failure mode a real player reported (several Supervisor
+    Unlock items received via AP, only some actually reflected in the
+    save) with no retry ever attempted. This does not change behavior for
+    a genuinely broken/missing file - it still raises after exhausting
+    retries, so real errors are still caught and logged by callers exactly
+    as before.
+    """
+    last_err = None
+    for attempt in range(_GM_JSON_RETRIES):
+        try:
+            with open(path, "rb") as f:
+                data = f.read()
+            if data and data[-1] == 0:
+                data = data[:-1]
+            return json.loads(data.decode("utf-8"))
+        except (OSError, ValueError) as e:
+            last_err = e
+            if attempt < _GM_JSON_RETRIES - 1:
+                time.sleep(_GM_JSON_RETRY_DELAY)
+    raise last_err
 
 
 def _write_gm_json(path, obj):
-    """Write a GameMaker buffer_string JSON save file."""
+    """Write a GameMaker buffer_string JSON save file. See _read_gm_json
+    for why this retries - the game process can hold this same file
+    briefly during its own autosave."""
     s = json.dumps(obj, separators=(',', ':'))
-    with open(path, "wb") as f:
-        f.write(s.encode("utf-8"))
-        f.write(b"\x00")  # null terminator
+    payload = s.encode("utf-8") + b"\x00"  # null terminator
+    last_err = None
+    for attempt in range(_GM_JSON_RETRIES):
+        try:
+            with open(path, "wb") as f:
+                f.write(payload)
+            return
+        except OSError as e:
+            last_err = e
+            if attempt < _GM_JSON_RETRIES - 1:
+                time.sleep(_GM_JSON_RETRY_DELAY)
+    raise last_err
+
+
+_SAVE_VERIFY_RETRIES = 10
+_SAVE_VERIFY_RETRY_DELAY = 0.15
+
+
+def _apply_save_field(path, field, value):
+    """
+    Read-modify-write a single field in a real GameMaker save file
+    (NUBBY_Progression*_F.save), VERIFYING the write actually stuck before
+    returning - and retrying the whole read-modify-write cycle if not.
+
+    _read_gm_json/_write_gm_json's own internal retry only catches raised
+    exceptions (a transient sharing violation - a real failure mode, but a
+    different one). It does nothing for the actual bug found here: the
+    game process itself periodically autosaves these exact same files
+    independently. A plain read-modify-write can complete with NO
+    exception at all - both this function's read/write and the game's own
+    read/write each succeed individually - and STILL silently lose the
+    change, because the two read-modify-write cycles can interleave: if
+    the game reads its own (older) copy before this function's write
+    lands, then writes it back afterward, the game's write clobbers this
+    one with stale data. A classic lost-update race between two
+    uncooperative writers, not a lock/contention failure - confirmed via a
+    real player's save state showing several Supervisor Unlock items
+    received with no error logged anywhere, yet the corresponding
+    SaveU_SVx field still read 0. Re-reading after a short delay and
+    retrying the whole cycle until the field actually reads back as
+    expected is self-correcting even if something else clobbers it in
+    between - unlike a bare write-and-hope.
+    """
+    for attempt in range(_SAVE_VERIFY_RETRIES):
+        data = _read_gm_json(path)
+        if data[0].get(field) == value:
+            return True
+        data[0][field] = value
+        _write_gm_json(path, data)
+        time.sleep(_SAVE_VERIFY_RETRY_DELAY)
+        verify_data = _read_gm_json(path)
+        if verify_data[0].get(field) == value:
+            return True
+    return False
 
 
 def deliver_supervisor(sv_index):
     """Unlock a supervisor in NUBBY_Progression_F.save."""
     path = os.path.join(SAVE_DIR, "NUBBY_Progression_F.save")
     try:
-        data = _read_gm_json(path)
-        data[0][f"SaveU_SV{sv_index}"] = 1
-        _write_gm_json(path, data)
-        print(f"[NubbyAP] Unlocked supervisor {sv_index} in save file")
+        field = f"SaveU_SV{sv_index}"
+        if _apply_save_field(path, field, 1):
+            print(f"[NubbyAP] Unlocked supervisor {sv_index} in save file")
+        else:
+            print(f"[NubbyAP] deliver_supervisor {sv_index} did not stick after {_SAVE_VERIFY_RETRIES} attempts - will retry on next /resync")
     except Exception as e:
         print(f"[NubbyAP] deliver_supervisor failed: {e}")
 
@@ -323,10 +377,11 @@ def deliver_tony_skin():
     """Unlock the Tony (tonyfan) Nubby skin in NUBBY_Progression3_F.save."""
     path = os.path.join(SAVE_DIR, "NUBBY_Progression3_F.save")
     try:
-        data = _read_gm_json(path)
-        data[0][f"SaveU_Cosmo_NubbySkin{TONY_SKIN_INDEX}"] = 1
-        _write_gm_json(path, data)
-        print("[NubbyAP] Unlocked Tony skin in save file")
+        field = f"SaveU_Cosmo_NubbySkin{TONY_SKIN_INDEX}"
+        if _apply_save_field(path, field, 1):
+            print("[NubbyAP] Unlocked Tony skin in save file")
+        else:
+            print(f"[NubbyAP] deliver_tony_skin did not stick after {_SAVE_VERIFY_RETRIES} attempts - will retry on next /resync")
     except Exception as e:
         print(f"[NubbyAP] deliver_tony_skin failed: {e}")
 
@@ -431,10 +486,10 @@ def deliver_challenges_unlock():
     for this rather than needing a new GML file-check patch."""
     path = os.path.join(SAVE_DIR, "NUBBY_Progression_F.save")
     try:
-        data = _read_gm_json(path)
-        data[0]["SaveU_ChallengeMode"] = 1
-        _write_gm_json(path, data)
-        print("[NubbyAP] Unlocked Challenge mode in save file")
+        if _apply_save_field(path, "SaveU_ChallengeMode", 1):
+            print("[NubbyAP] Unlocked Challenge mode in save file")
+        else:
+            print(f"[NubbyAP] deliver_challenges_unlock did not stick after {_SAVE_VERIFY_RETRIES} attempts - will retry on next /resync")
     except Exception as e:
         print(f"[NubbyAP] deliver_challenges_unlock failed: {e}")
 
@@ -449,19 +504,25 @@ def _queue_trap(trap_code):
 
 
 def _queue_bonus(room_dir, kind, amount):
-    """Accumulate a permanent starting-money/starting-lives bonus for this room."""
+    """Accumulate a permanent starting-money/lives/jumbles/rarity bonus for
+    this room."""
     path = os.path.join(room_dir, "bonus_totals.json")
-    totals = _read_json(path, default={"money": 0, "lives": 0})
+    totals = _read_json(path, default={"money": 0, "lives": 0, "jumbles": 0, "rarity": 0})
     totals[kind] = totals.get(kind, 0) + amount
     _write_json(path, totals)
     _write_bonus_file(totals)
+    with open(BONUS_DELTA_FILE, "a") as f:
+        f.write(f"{kind}={amount}\n")
     print(f"[NubbyAP] Permanent {kind} bonus -> {totals[kind]}")
+    _debug_log(f"queue_bonus kind={kind} new_total={totals[kind]} bonus_file={BONUS_FILE}")
 
 
 def _write_bonus_file(totals):
     with open(BONUS_FILE, "w") as f:
         f.write(f"money={totals.get('money', 0)}\n")
         f.write(f"lives={totals.get('lives', 0)}\n")
+        f.write(f"jumbles={totals.get('jumbles', 0)}\n")
+        f.write(f"rarity={totals.get('rarity', 0)}\n")
 
 
 # ── Per-room save isolation + backups ───────────────────────────────────────
@@ -605,6 +666,25 @@ def _lock_progression_for_fresh_room(room_save_dir, lock_challenges=False):
             p0[f"SaveSvWins{i}"] = 0
         for i in range(12):
             p0[f"SaveBeatChallenge{i}"] = 0
+        # Round milestones (Reach Round 5/10/.../80) - same reasoning as
+        # SvWins/BeatChallenge above: this save was just copied from
+        # vanilla, so a player who already reached (say) round 50 before
+        # ever touching AP would otherwise have those flags baked into the
+        # very first snapshot taken, which BECOMES the baseline on cold
+        # start (see _read_progress_snapshot/progress_watcher) - making
+        # those locations permanently unreachable for this room instead of
+        # just already-known-not-yet-achieved.
+        for n in range(5, 81, 5):
+            p0[f"SaveRoundMS{(n // 5) - 1}"] = 0
+        # Restock milestones - same reasoning as round milestones above.
+        for i in range(len(RESTOCK_THRESHOLDS)):
+            p0[f"SaveRestockMS{i}"] = 0
+        # Points system - lifetime goal count (+ current in-progress score,
+        # which resets to 0 each time a goal is reached - see the master
+        # GML script's V51 section), same reasoning: a save copied from
+        # vanilla play could already have real progress baked in.
+        p0["SaveApScore"] = 0
+        p0["SaveApGoalsReached"] = 0
         # Challenge mode as a whole (see NNFOptions.lock_challenges) - reuses
         # the game's own obj_GAME.U_ChallengeMode flag, same direct-edit
         # mechanism as SV0/Tony above, only applied when that option is on
@@ -706,6 +786,11 @@ def activate_room_save(server_address, seed_name, slot_name, slot_data=None):
             _copy_save_files(VANILLA_DIR, room_save_dir)
             _lock_progression_for_fresh_room(room_save_dir, lock_challenges=bool(slot_data.get("lock_challenges")))
             _write_json(os.path.join(room_dir, "manifest.json"), manifest)
+            # See _zeroed_progress_baseline's docstring - closes the
+            # cold-start race where rapid early progress could otherwise
+            # get silently absorbed into progress_watcher's first-tick
+            # baseline instead of being detected and sent.
+            _write_json(os.path.join(room_dir, "progress_baseline.json"), _zeroed_progress_baseline())
             print(f"[NubbyAP] New AP room -> created isolated, freshly-locked save slot at {room_dir}")
         else:
             print(f"[NubbyAP] Switching to known AP room -> restoring save slot at {room_dir}")
@@ -728,7 +813,7 @@ def activate_room_save(server_address, seed_name, slot_name, slot_data=None):
     # whichever room is active now, not whatever a previous room left behind.
     _write_item_pool_file(_read_json(os.path.join(room_dir, "unlocked_pool.json"), default=[]))
     _write_perk_pool_file(_read_json(os.path.join(room_dir, "unlocked_perks.json"), default=[]))
-    _write_bonus_file(_read_json(os.path.join(room_dir, "bonus_totals.json"), default={"money": 0, "lives": 0}))
+    _write_bonus_file(_read_json(os.path.join(room_dir, "bonus_totals.json"), default={"money": 0, "lives": 0, "jumbles": 0, "rarity": 0}))
     _write_zone_unlock_files(_read_json(os.path.join(room_dir, "unlocked_zones.json"), default=[]))
     _write_feature_lock_flags(slot_data, _read_json(os.path.join(room_dir, "unlocked_features.json"), default=[]))
 
@@ -761,6 +846,50 @@ def _read_progress_snapshot():
         snap[f"challenge_{i}"] = bool(p0.get(f"SaveBeatChallenge{i}", False))
     for i in range(1, 6):
         snap[f"trial_{i}"] = bool(t0.get(f"SaveBeatNubbyTrialsLvl{i}", False))
+    for n in range(5, 81, 5):
+        snap[f"round_ms_{n}"] = bool(p0.get(f"SaveRoundMS{(n // 5) - 1}", False))
+    for i in range(len(RESTOCK_THRESHOLDS)):
+        snap[f"restock_ms_{i}"] = bool(p0.get(f"SaveRestockMS{i}", False))
+    # Points system (second, additional check source alongside restock
+    # milestones above) - SaveApGoalsReached is a lifetime, monotonically-
+    # increasing count of how many sequential goals have been reached (the
+    # in-progress SaveApScore resets to 0 each time a goal is hit, so it's
+    # NOT itself monotonic and isn't polled here - see the master GML
+    # script's V51 section). "Has goal K been reached" is just a plain
+    # comparison against this one count - no per-threshold save fields
+    # needed (see progress_watcher's diff).
+    snap["ap_goals_reached"] = int(p0.get("SaveApGoalsReached", 0) or 0)
+    return snap
+
+
+def _zeroed_progress_baseline():
+    """Same shape as _read_progress_snapshot(), but hardcoded to the
+    all-not-yet-achieved state a freshly-locked room's save is written to
+    by _lock_progression_for_fresh_room. Written directly to
+    progress_baseline.json at room creation (see activate_room_save)
+    instead of leaving the baseline to lazily cold-start on
+    progress_watcher's first poll tick - that lazy cold-start reads
+    whatever the live save happens to say at that moment, and if the
+    player reaches real progress (e.g. rapid-fire testing supervisor wins
+    via dev/debug tools right after connecting) before that first ~2s
+    tick lands, that progress gets silently baked into the "starting"
+    baseline and its check is never sent automatically - the exact
+    "several supervisor wins had to be sent through the console" failure
+    mode. Pre-seeding a known-zero baseline at room creation removes the
+    race entirely for every category polled from NUBBY_Progression_F.save
+    / NUBBY_NubbyTrials_F.save."""
+    snap = {}
+    for i in range(1, 12):
+        snap[f"sv_wins_{i}"] = 0.0
+    for i in range(12):
+        snap[f"challenge_{i}"] = False
+    for i in range(1, 6):
+        snap[f"trial_{i}"] = False
+    for n in range(5, 81, 5):
+        snap[f"round_ms_{n}"] = False
+    for i in range(len(RESTOCK_THRESHOLDS)):
+        snap[f"restock_ms_{i}"] = False
+    snap["ap_goals_reached"] = 0
     return snap
 
 
@@ -774,6 +903,46 @@ def _read_current_all_points():
         return float(data[0].get("A_AllPoints", 0) or 0)
     except Exception:
         return 0.0
+
+
+def _read_current_round():
+    """The live run's current round (A_CurrentRound in NUBBY_AutoSave_F.save)
+    - 0 if no run is currently in progress. Same file/pattern as
+    _read_current_all_points."""
+    try:
+        data = _read_gm_json(os.path.join(SAVE_DIR, "NUBBY_AutoSave_F.save"))
+        return int(data[0].get("A_CurrentRound", 0) or 0)
+    except Exception:
+        return 0
+
+
+# The 14 real vanilla shop rounds - confirmed via decompile of
+# scr_CalcWinRound's obj_TimeLineMGMT generator: a switch on round % 20
+# sets TimeLine[round] = 1 (shop) at residues 5, 10, 15, 19, but an
+# unconditional override right after it - "if (round % 40 == 15)
+# TimeLine[round] = 6" - turns the residue-15 shop back into a non-shop
+# event in every OTHER 20-round zone (round % 40 == 15: zones 1, 3, 5,
+# ...), while leaving it alone in the zones between (round % 40 == 35:
+# zones 2, 4, 6, ...). Over rounds 1-80 this yields exactly these 14 -
+# NOT the naive "round % 20 in (5,10,15,19)" guess used previously, which
+# wrongly included round 15/55 (etc.) as shop rounds when the game itself
+# never turns them into one. The same 20/40-round pattern recurs forever
+# past round 80 (RoundLimit keeps pace with CurrentRnd 1-for-1 once it
+# starts, extending 4 rounds' worth of the same switch+override every
+# round from round 77 on) - see _is_real_shop_round, used for both the 14
+# real per-round assignments AND the round 80+ fallback.
+SHOP_ROUNDS = [5, 10, 19, 25, 30, 35, 39, 45, 50, 59, 65, 70, 75, 79]
+
+
+def _is_real_shop_round(round_num):
+    if round_num <= 0:
+        return False
+    residue = round_num % 20
+    if residue in (5, 10, 19):
+        return True
+    if residue == 15:
+        return (round_num % 40) == 35
+    return False
 
 
 def _update_cumulative_score(room_dir):
@@ -807,26 +976,32 @@ def _append_ap_log_line(text):
             f.write(ln + "\n")
 
 
-def _write_sphere_files(slot_data):
+def _write_zone_shop_files(slot_data):
     """
-    Writes (or clears) the sphere-based-shops files from slot_data, once per
-    connection - see NNFOptions.sphere_based_shops. slot_data's dict keys
-    arrive as strings over the wire (JSON), so sphere numbers are looked up
-    as str(n).
+    Always clears the zone-based-shops files, regardless of slot_data -
+    NNFOptions.zone_based_shops's actual in-game effect (restricting the
+    Normal Shop's pool to whichever items landed in the CURRENT zone's
+    random split, via global.Zone = ((CurrentRnd-1) div 20)+1 - see the
+    zone-shop block in PatchApItemLockV30_MASTER.csx) is explicitly
+    unwanted per user report: since zone is derived from the CURRENT run's
+    round count, it resets to 1 every new run (e.g. picking a different
+    Supervisor), so a player would see previously-unlocked items vanish
+    from the shop and have to re-climb rounds to see them again - "once an
+    item is unlocked it should be unlocked forever". Disabled client-side
+    (rather than just flipping the option's default) so this takes effect
+    immediately on next connect even for rooms generated with the option
+    already on, by deleting any zone-shop files a prior connection wrote -
+    once ZONE_SHOPS_FLAG_FILE is gone, the GML patch's own
+    `file_exists("NubbyAP/ap_zone_shops.txt")` gate skips the restriction
+    entirely and every unlocked item stays visible regardless of zone/run.
+    The generation-side option/zone_items split in __init__.py is left
+    alone (harmless - nothing reads its output once this never writes the
+    files it depends on) rather than removed, in case zone-based shops
+    ever gets revisited with different semantics later.
     """
-    if not slot_data.get("sphere_based_shops"):
-        for f in (SPHERE_SHOPS_FLAG_FILE, *SPHERE_ITEM_FILES.values()):
-            if os.path.exists(f):
-                os.remove(f)
-        return
-
-    open(SPHERE_SHOPS_FLAG_FILE, "w").close()
-    sphere_items = slot_data.get("sphere_items", {})
-    for sphere_num, path in SPHERE_ITEM_FILES.items():
-        game_ids = sphere_items.get(str(sphere_num), [])
-        with open(path, "w") as f:
-            for game_id in game_ids:
-                f.write(f"{game_id}\n")
+    for f in (ZONE_SHOPS_FLAG_FILE, *ZONE_ITEM_FILES.values()):
+        if os.path.exists(f):
+            os.remove(f)
 
 
 def _write_zone_lock_flag(slot_data):
@@ -855,14 +1030,11 @@ def _write_custom_final_round_file(slot_data):
 
 
 def _offer_location_code(offer):
-    """None if offer is missing/malformed (e.g. a leftover file in the old
-    {"game_id": X} shape from before items/perks shared this rotation) - the
-    caller treats that as "needs a fresh pick" rather than crashing."""
-    if not isinstance(offer, dict) or "id" not in offer:
+    """None if offer is missing/malformed - the caller treats that as
+    "needs a fresh pick" rather than crashing."""
+    if not isinstance(offer, dict) or "slot" not in offer:
         return None
-    if offer.get("kind") == "perk":
-        return BASE_ID + 300 + offer["id"]
-    return BASE_ID + 1000 + offer["id"]
+    return BASE_ID + 1000 + offer["slot"]
 
 
 def _write_ap_item_name_file(offer):
@@ -871,10 +1043,13 @@ def _write_ap_item_name_file(offer):
     stays deliberately generic - Archipelago never reveals what's
     actually at an unchecked location (this player's own or anyone
     else's) until it's checked, so naming the specific item would be a
-    false preview. Tier (filler/useful/progression) is the one exception,
-    written alongside to AP_ITEM_TIER_FILE - explicitly requested by the
-    user despite the above, and arguably not a full reveal the same way
-    a name would be.
+    false preview. Tier used to vary by a nominal "what vanilla item is
+    this slot thematically named after" lookup - that concept doesn't
+    apply anymore now that a shop slot is just one of exactly 14 fixed,
+    generically-named checks with no association to any particular item
+    (any item in the multiworld can be the reward at any location - see
+    locations.py's SHOP_LOCATIONS comment), so this always writes the
+    same neutral "useful" tier rather than guessing at one.
     """
     if _offer_location_code(offer) is None:
         if os.path.exists(AP_ITEM_NAME_FILE):
@@ -884,49 +1059,121 @@ def _write_ap_item_name_file(offer):
         return
     with open(AP_ITEM_NAME_FILE, "w") as f:
         f.write("AP: Archipelago Check\n")
-
-    if offer.get("kind") == "perk":
-        tier = _AP_PERK_CATALOG.get(offer.get("id"), (None, "useful"))[1]
-    else:
-        tier = _item_classification(offer.get("id"))
     with open(AP_ITEM_TIER_FILE, "w") as f:
-        f.write(tier + "\n")
+        f.write("useful\n")
+
+
+def _round_shop_state_path(room_dir):
+    return os.path.join(room_dir, "round_shop_state.json")
+
+
+def _read_shop_state(room_dir):
+    """
+    round_shop_state.json, migration-guarded: the pre-rework shape tracked
+    a random item/perk/other "kind" assignment per ROUND (and kept an
+    "assignments" key no version of the new shape ever writes), while this
+    one just tracks which of the 14 fixed SLOTS have been bought. An old
+    file left over from a room played before this rework would otherwise
+    have its round numbers silently misread as slot indices (a stale
+    "consumed" entry for round 25, say, would wrongly retire slot 25 -
+    which doesn't exist - while never retiring the real slot for round 25
+    at all) - detected via the "assignments" key, which only the old shape
+    ever wrote, and treated as a fresh start rather than migrated, since
+    the whole point of the rework was that the old assignments could be
+    wrong (wrong rounds, could hand out a real "Hairy Fingore" purchase)
+    and aren't worth preserving.
+    """
+    state = _read_json(_round_shop_state_path(room_dir), default={"consumed": []})
+    if "assignments" in state:
+        return {"consumed": []}
+    return state
+
+
+def _debug_log(msg):
+    """TEMPORARY diagnostic - appends a timestamped line to
+    NubbyAP/ap_debug.txt. Lets the GML side's own debug log (see the
+    master .csx's V56 section) be cross-referenced against what THIS
+    process believed the round/offer state was at the same moment, to
+    pin down whether a reported "AP item doesn't show without a reroll"
+    case is a client-side (this file) or game-side (GML) problem. Safe to
+    remove entirely once root-caused; never read by anything else."""
+    try:
+        with open(os.path.join(SAVE_FOLDER, "ap_debug.txt"), "a", encoding="utf-8") as f:
+            f.write(f"{time.time():.2f} {msg}\n")
+    except Exception:
+        pass
 
 
 def _pick_next_ap_offer(room_dir, ctx):
     """
-    Picks (and persists) which still-unchecked location - a shop item
-    purchase or a perk - the AP Item slot currently represents. Stable
-    until it's actually bought - repeated picks return the same one
-    instead of shuffling. Both items and perks are sent through this same
-    slot rather than items being bought normally and perks being detected
-    via chest pickups.
+    Picks (and persists) which of the 14 real AP shop checks (see
+    SHOP_ROUNDS) the dedicated AP slot currently represents - stable
+    until it's actually bought.
+
+    Exactly 14 possible shop checks exist, period - one per real vanilla
+    shop round (5, 10, 19, ..., 79 - see _is_real_shop_round). A check has
+    no required relationship to what it grants; that's entirely up to the
+    multiworld's own fill (any item in the pool, this player's or
+    another's, can land at any location) - this file only ever needs to
+    decide WHICH of the 14 checks to expose right now, never what's
+    "supposed to" be behind it.
+
+    Rounds 1-80: round-keyed 1:1 via SHOP_ROUNDS' own order - the Nth real
+    shop round always maps to slot N ("AP Item Purchase N"), every time
+    this room is played, forever.
+
+    Round 80+: the same 20/40-round shop pattern keeps recurring (see
+    _is_real_shop_round), but there's no 15th+ slot to hand out - instead
+    any later real shop round offers whichever of the 14 hasn't been
+    bought yet (first not-yet-consumed slot in SHOP_ROUNDS order), so a
+    player who missed one (e.g. couldn't afford it at its own round) can
+    still get it eventually rather than losing it forever.
     """
     offer_path = os.path.join(room_dir, "next_ap_offer.json")
-    offer = _read_json(offer_path, default=None)
     checked = ctx.locations_checked or set()
+    current_round = _read_current_round()
 
-    code = _offer_location_code(offer)
-    if code is not None and code not in checked:
-        return offer
+    state_path = _round_shop_state_path(room_dir)
+    state = _read_shop_state(room_dir)
+    consumed = state.setdefault("consumed", [])
 
-    purchase_counts = _read_json(os.path.join(room_dir, "shop_purchase_counts.json"), default={})
-    candidates = (
-        [{"kind": "item", "id": g} for g in _GAME_ID_TO_AP_ITEM]
-        + [{"kind": "perk", "id": p} for p in _AP_PERK_CATALOG]
+    offer = None
+    if ctx.include_item_purchases and _is_real_shop_round(current_round):
+        slot = None
+        if current_round in SHOP_ROUNDS:
+            slot = SHOP_ROUNDS.index(current_round) + 1
+        else:
+            for candidate in range(1, len(SHOP_ROUNDS) + 1):
+                if candidate not in consumed:
+                    slot = candidate
+                    break
+        if slot is not None and slot not in consumed:
+            code = BASE_ID + 1000 + slot
+            if code not in checked:
+                offer = {"slot": slot}
+
+    # TEMPORARY diagnostic (see _debug_log) - pinpointing why the AP shop
+    # slot isn't reliably appearing without a reroll despite the picking
+    # logic itself checking out correctly in isolation. Safe to remove
+    # once that's found; append-only, never read by anything.
+    _debug_log(
+        f"pick_offer round={current_round} include_item_purchases={ctx.include_item_purchases} "
+        f"is_shop_round={_is_real_shop_round(current_round)} consumed={consumed} offer={offer}"
     )
-    candidates = [c for c in candidates if _offer_location_code(c) not in checked]
-    candidates = [
-        c for c in candidates
-        if c["kind"] != "item"
-        or purchase_counts.get(_GAME_ID_TO_SHOP.get(c["id"], ""), 0) < SHOP_PURCHASE_CAP
-    ]
-    if not candidates:
+
+    if offer is None:
         _write_json(offer_path, {})
         _write_ap_item_name_file(None)
         return None
 
-    offer = random.choice(candidates)
+    # Re-write the offer/name/tier files on every poll (not just when the
+    # underlying decision changes) - the game mod only shows an AP item
+    # slot while AP_ITEM_NAME_FILE exists, and that file can legitimately
+    # go missing without the offer itself changing (disconnect() removes
+    # it on ANY dropped connection, including one the client's own auto-
+    # reconnect recovers from transparently). Without this, a single
+    # reconnect while the current offer is still unbought permanently
+    # breaks the AP item slot for the rest of the session.
     _write_json(offer_path, offer)
     _write_ap_item_name_file(offer)
     return offer
@@ -954,16 +1201,17 @@ def _consume_ap_item_purchase_signal(room_dir):
     if offer_code is None:
         return []
 
-    # Count this purchase against its shop's cap (see SHOP_PURCHASE_CAP) -
-    # perks aren't shop-flavored, so only "item" offers count here.
-    if isinstance(offer, dict) and offer.get("kind") == "item":
-        shop = _GAME_ID_TO_SHOP.get(offer.get("id"))
-        if shop:
-            counts_path = os.path.join(room_dir, "shop_purchase_counts.json")
-            counts = _read_json(counts_path, default={})
-            counts[shop] = counts.get(shop, 0) + 1
-            _write_json(counts_path, counts)
-            print(f"[NubbyAP] {shop} shop AP purchases: {counts[shop]}/{SHOP_PURCHASE_CAP}")
+    # Permanently retire this slot (tracked by slot number 1-14, NOT round
+    # number - a round past 80 offering a "leftover" slot isn't that
+    # slot's permanent home, so a future round could still be the one that
+    # finally sees it bought).
+    slot = offer["slot"]
+    state_path = _round_shop_state_path(room_dir)
+    state = _read_shop_state(room_dir)
+    consumed = state.setdefault("consumed", [])
+    if slot not in consumed:
+        consumed.append(slot)
+        _write_json(state_path, state)
 
     return [offer_code]
 
@@ -1064,8 +1312,25 @@ class NubbyCommandProcessor(ClientCommandProcessor):
     def _cmd_resync(self):
         """Force a full resync of received items."""
         if isinstance(self.ctx, NubbyContext):
+            # Actually reset the item-processing bookmark first - sending
+            # {"cmd": "Sync"} alone (the only thing this used to do) makes
+            # the server resend the full ReceivedItems list, but the
+            # client's own skip = max(0, last_index - server_index) logic
+            # would then just skip straight back past everything it
+            # already thinks it's seen, silently discarding the resend and
+            # fixing nothing. Deleting the bookmark makes the next
+            # ReceivedItems start from index 0, replaying every item this
+            # slot has ever received - safe since every delivery handler
+            # (deliver_supervisor, _queue_unlocked_item, etc.) is already
+            # an idempotent "apply if not already applied" operation.
+            try:
+                index_file = _item_index_path()
+                if os.path.exists(index_file):
+                    os.remove(index_file)
+            except OSError:
+                pass
             self.ctx.syncing = True
-            self.output("Resyncing items...")
+            self.output("Resyncing items and locations...")
 
     def _cmd_backup_now(self):
         """Take an immediate backup snapshot of the current save."""
@@ -1118,6 +1383,10 @@ class NubbyContext(CommonContext):
         self.required_count = 0
         self.lock_zone5 = False
         self.score_goal = 0
+        self.include_item_purchases = True
+        self.include_perks = True
+        self.include_traps = False
+        self.points_check_count = 100
         os.makedirs(self.save_folder, exist_ok=True)
 
     async def server_auth(self, password_requested: bool = False):
@@ -1183,7 +1452,7 @@ class NubbyContext(CommonContext):
             # early and unconditionally as possible, deliberately BEFORE
             # any of the auxiliary writes below - they're what the in-game
             # connection marker reads, and a failure in some unrelated bit
-            # of bookkeeping (sphere files, slot_data.txt, ...) must never
+            # of bookkeeping (zone-shop files, slot_data.txt, ...) must never
             # be able to leave the marker reporting "Disconnected" while
             # actually connected. Confirmed this exact failure mode: an
             # earlier version removed AP_LOG_FILE inside activate_room_save
@@ -1205,8 +1474,15 @@ class NubbyContext(CommonContext):
                 self.required_count = sd.get("required_count", 0)
                 self.lock_zone5 = bool(sd.get("lock_zone5"))
                 self.score_goal = sd.get("score_goal", 0)
+                # Old rooms without these keys (pre-dating this option being
+                # sent) default to True - matches include_item_purchases/
+                # include_perks both defaulting on in options.py.
+                self.include_item_purchases = bool(sd.get("include_item_purchases", True))
+                self.include_perks = bool(sd.get("include_perks", True))
+                self.include_traps = bool(sd.get("include_traps", False))
+                self.points_check_count = int(sd.get("points_check_count", 100))
                 self.finished_game = False
-                _write_sphere_files(sd)
+                _write_zone_shop_files(sd)
                 _write_zone_lock_flag(sd)
                 _write_custom_final_round_file(sd)
                 room_dir = _active_room_dir()
@@ -1217,12 +1493,20 @@ class NubbyContext(CommonContext):
                         f.write(f"{k}={v}\n")
                 checked = args.get("checked_locations", [])
                 if checked:
+                    # Authoritative from the server - merge into our own
+                    # tracking set (previously this only wrote a side file
+                    # nothing ever read back) so _pick_next_ap_offer's "is
+                    # this AP Item Purchase location already done" check is
+                    # correct immediately after a (re)connect, not just
+                    # once this process has personally seen every check
+                    # happen during its own current run.
+                    self.locations_checked = set(getattr(self, "locations_checked", None) or []) | set(checked)
                     with open(os.path.join(folder, "checked_locs_server.txt"), "w") as f:
                         for loc_id in checked:
                             f.write(f"{loc_id}\n")
             except Exception as e:
                 import traceback
-                print(f"[NubbyAP] slot_data/sphere-file handling FAILED: {e}")
+                print(f"[NubbyAP] slot_data/zone-shop-file handling FAILED: {e}")
                 print(traceback.format_exc())
 
             # Only launch the game once connected.flag/slot_data.txt actually
@@ -1235,6 +1519,43 @@ class NubbyContext(CommonContext):
 
         elif cmd == "ReceivedItems":
             try:
+                if _active_room_dir() is None:
+                    # activate_room_save (from the "Connected" handler,
+                    # just above) hasn't finished setting up the active
+                    # room yet, or failed - every room_dir-scoped grant
+                    # below (shop items, perks, zone unlocks, feature
+                    # unlocks, bonuses; NOT Supervisor/Tony-skin/Challenges
+                    # unlocks, which write straight to the save files and
+                    # don't need it) would silently no-op if processed now,
+                    # while the index file below still advances past them
+                    # as if they'd succeeded - permanently losing that
+                    # grant, since nothing else ever re-delivers it. Bail
+                    # out without touching the index file so this exact
+                    # batch isn't marked as processed.
+                    #
+                    # Confirmed real bug (not just theoretical): bailing out
+                    # here alone does NOT actually get this batch retried.
+                    # The server does not resend already-dispatched items on
+                    # its own - the NEXT live ReceivedItems packet (e.g. a
+                    # single later item) arrives with its own server_index
+                    # sitting past this whole dropped batch, and
+                    # skip = max(0, last_index - server_index) clamps to 0
+                    # since last_index (still 0, untouched) is behind
+                    # server_index - so that later packet's own new_last
+                    # write silently jumps the bookmark forward across the
+                    # gap, permanently hiding it. A user hit this exactly:
+                    # a big early batch (many item unlocks) got dropped by
+                    # this race, only the handful of items received after
+                    # the race window showed as unlocked, and the fix was
+                    # manually running /resync (deletes the index bookmark,
+                    # forcing a full idempotent replay from index 0).
+                    # Setting self.syncing = True here makes progress_watcher
+                    # send the same {"cmd": "Sync"} on its next tick
+                    # automatically, so this self-heals within a second or
+                    # two instead of requiring a manual /resync.
+                    print("[NubbyAP] ReceivedItems arrived before an active room was ready - requesting a full resync")
+                    self.syncing = True
+                    return
                 items = args.get("items", [])
                 server_index = args.get("index", 0)
 
@@ -1270,6 +1591,16 @@ class NubbyContext(CommonContext):
                         room_dir = _active_room_dir()
                         if room_dir:
                             _queue_bonus(room_dir, "lives", 1)
+                    elif ap_id == BASE_ID + 3002:
+                        pass  # Filler: Nubby - intentionally does nothing
+                    elif ap_id == BASE_ID + 3003:
+                        room_dir = _active_room_dir()
+                        if room_dir:
+                            _queue_bonus(room_dir, "jumbles", 1)
+                    elif ap_id == BASE_ID + 3004:
+                        room_dir = _active_room_dir()
+                        if room_dir:
+                            _queue_bonus(room_dir, "rarity", 2)
                     elif ap_id == BASE_ID + 4000:
                         deliver_tony_skin()
                     elif ap_id == BASE_ID + 4004:  # Progressive Zone Unlock
@@ -1309,6 +1640,7 @@ class NubbyContext(CommonContext):
         elif cmd == "RoomUpdate":
             checked = args.get("checked_locations", [])
             if checked:
+                self.locations_checked = set(getattr(self, "locations_checked", None) or []) | set(checked)
                 with open(os.path.join(folder, "checked_locs_server.txt"), "a") as f:
                     for loc_id in checked:
                         f.write(f"{loc_id}\n")
@@ -1319,18 +1651,36 @@ class NubbyContext(CommonContext):
             os.remove(flag)
         if os.path.exists(CONNECTION_INFO_FILE):
             os.remove(CONNECTION_INFO_FILE)
-        # Leaving these behind would lock AP items/perks out of vanilla play
-        # too, and carry the AP room's bonus into vanilla saves, since the
-        # mod only checks whether each file exists. AP_LOG_FILE is
-        # deliberately NOT cleared here - a disconnect (e.g. a brief network
-        # blip) shouldn't wipe the visible in-game history; it's only reset
-        # on an actual room switch, in activate_room_save.
-        for f in (ITEM_POOL_FILE, PERK_POOL_FILE, BONUS_FILE, AP_ITEM_NAME_FILE, AP_ITEM_TIER_FILE, ITEM_PURCHASED_SIGNAL_FILE,
-                  SPHERE_SHOPS_FLAG_FILE, *SPHERE_ITEM_FILES.values(),
-                  ZONE_LOCK_FLAG_FILE, ZONE5_LOCK_FLAG_FILE, *ZONE_UNLOCK_FILES.values(),
-                  CUSTOM_FINAL_ROUND_FILE, *FEATURE_LOCK_FLAG_FILES.values()):
-            if os.path.exists(f):
-                os.remove(f)
+        # CRITICAL: this whole cleanup block used to run unconditionally,
+        # including for a transient drop the framework is about to auto-
+        # reconnect from on its own (allow_autoreconnect=True) - not just a
+        # deliberate final disconnect. ITEM_POOL_FILE/PERK_POOL_FILE/the
+        # zone+zone-shop+feature-lock flag files are exactly what the GML mod's
+        # lock enforcement (obj_ItemMGMT's lockBlock, "if
+        # (file_exists(\"NubbyAP/ap_item_pool.txt\")) { ...lock everything
+        # in _apItemIds... }") is gated on existing at all - deleting them on
+        # every brief network blip meant EVERY locked item/perk/zone/feature
+        # became purchasable/accessible again for the whole window until the
+        # next successful reconnect's activate_room_save call restored them.
+        # Confirmed via a real room log: 3 separate few-second-to-few-minute
+        # join/leave cycles within one continuous play session, explaining a
+        # "locked" item (Pants) apparently being available despite never
+        # having been received - not a receive-side bug, the lock was simply
+        # switched off for a while. Only run this cleanup - matching the
+        # already-correct AP_LOG_FILE precedent right below - on a real
+        # final disconnect (allow_autoreconnect=False); a reconnecting drop
+        # leaves every lock/pool/flag file exactly as it was, since nothing
+        # about the room or its randomization state actually changed.
+        # AP_LOG_FILE is deliberately NOT cleared here either way - a brief
+        # network blip shouldn't wipe the visible in-game history; it's only
+        # reset on an actual room switch, in activate_room_save.
+        if not allow_autoreconnect:
+            for f in (ITEM_POOL_FILE, PERK_POOL_FILE, BONUS_FILE, AP_ITEM_NAME_FILE, AP_ITEM_TIER_FILE, ITEM_PURCHASED_SIGNAL_FILE,
+                      ZONE_SHOPS_FLAG_FILE, *ZONE_ITEM_FILES.values(),
+                      ZONE_LOCK_FLAG_FILE, ZONE5_LOCK_FLAG_FILE, *ZONE_UNLOCK_FILES.values(),
+                      CUSTOM_FINAL_ROUND_FILE, *FEATURE_LOCK_FLAG_FILES.values()):
+                if os.path.exists(f):
+                    os.remove(f)
         try:
             room_dir = _active_room_dir()
             if room_dir and os.path.isdir(room_dir):
@@ -1353,9 +1703,9 @@ class NubbyContext(CommonContext):
 async def progress_watcher(ctx: NubbyContext):
     """
     Polls the game's own save files for Supervisor wins / Challenge
-    completions / Nubby Trials completions and reports them as location
-    checks. Also tracks goal completion the same way. No cooperation from
-    the game's own code is required for any of this.
+    completions / Nubby Trials completions / round milestones and reports
+    them as location checks. Also tracks goal completion the same way. No
+    cooperation from the game's own code is required for any of this.
     """
     while not ctx.exit_event.is_set():
         if ctx.syncing and ctx.server_task:
@@ -1403,6 +1753,29 @@ async def progress_watcher(ctx: NubbyContext):
                         key = f"trial_{i}"
                         if snap.get(key) and not baseline.get(key):
                             new_checks.append(BASE_ID + 200 + i)
+                    for n in range(5, 81, 5):
+                        key = f"round_ms_{n}"
+                        if snap.get(key) and not baseline.get(key):
+                            new_checks.append(BASE_ID + 400 + n)
+                    for i in range(len(RESTOCK_THRESHOLDS)):
+                        key = f"restock_ms_{i}"
+                        if snap.get(key) and not baseline.get(key):
+                            new_checks.append(BASE_ID + 500 + i)
+
+                    # Points system - ap_goals_reached is a single lifetime
+                    # count that only ever increases (the in-progress score
+                    # itself resets every goal, so it isn't diffed here) -
+                    # a jump can cover many sequential goals at once if the
+                    # client was offline/disconnected across several, so
+                    # report every goal index newly covered, capped at this
+                    # seed's configured points_check_count.
+                    old_goals = baseline.get("ap_goals_reached", 0) or 0
+                    new_goals = snap.get("ap_goals_reached", 0) or 0
+                    if new_goals > old_goals:
+                        lo = int(old_goals) + 1
+                        hi = min(int(new_goals), ctx.points_check_count)
+                        for i in range(lo, hi + 1):
+                            new_checks.append(BASE_ID + 1200 + i - 1)
 
                     supervisor_goal_met = bool(ctx.required_count) and goal_wins >= ctx.required_count
                     score_goal_met = bool(ctx.score_goal) and cumulative_score >= ctx.score_goal

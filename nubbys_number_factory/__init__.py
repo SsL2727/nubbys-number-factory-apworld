@@ -23,8 +23,9 @@ from BaseClasses import Item, ItemClassification, MultiWorld, Region, Tutorial
 from worlds.AutoWorld import WebWorld, World
 
 from .items import (
-    ALL_ITEMS, ITEM_ITEMS, PERK_ITEMS, SUPERVISOR_ITEMS, FILLER_ITEMS, COSMETIC_ITEMS, ZONE_ITEMS,
-    LOCK_ITEMS, TRAP_ITEMS, ITEM_NAME_TO_ID, ITEM_ID_TO_DATA, ITEMS_BY_SHOP, BASE_ID
+    ALL_ITEMS, ITEM_ITEMS, PERK_ITEMS, SUPERVISOR_ITEMS, FILLER_ITEMS, EXTRA_FILLER_ITEMS,
+    NUBBY_FILLER_ITEMS, COSMETIC_ITEMS, ZONE_ITEMS, LOCK_ITEMS, TRAP_ITEMS, ITEM_NAME_TO_ID,
+    ITEM_ID_TO_DATA, ITEMS_BY_SHOP, BASE_ID
 )
 from .locations import ALL_LOCATIONS, LOCATION_NAME_TO_ID, SUPERVISOR_LOCATIONS
 from .options import NNFOptions
@@ -96,11 +97,10 @@ class NubbyNumberFactoryWorld(World):
     # different location's check).
     precollected_names: set
 
-    # Sphere-based shops: game_id/perk_id -> which of 3 groups it landed in,
-    # for the game mod to restrict the Normal Shop's pool by round bracket.
-    # See generate_early for how these are built.
-    sphere_items: Dict[int, List[int]]
-    sphere_perks: Dict[int, List[int]]
+    # Zone-based shops: game_id -> which of 4 equal-split zone groups it
+    # landed in, for the game mod to restrict the Normal Shop's pool by
+    # global.Zone. See generate_early for how this is built.
+    zone_items: Dict[int, List[int]]
 
     # ── Generation entry point ────────────────────────────────────────────────
 
@@ -132,41 +132,49 @@ class NubbyNumberFactoryWorld(World):
 
         # Pre-collect starting shop items, independently per shop, so each
         # of the 3 shops has real starting variety instead of only whichever
-        # one a single global sample happens to land in. Cut-content items
-        # are excluded from sampling unless include_cut_content is on -
-        # otherwise a player without the option could still start with one.
+        # one a single global sample happens to land in.
+        # DISABLED (kept for later re-wiring, not deleted) - when
+        # include_cut_content existed, starting items were sampled from
+        # only the non-cut-content subset (`eligible` below) so a player
+        # without the option couldn't start with one. To re-enable: swap
+        # the two lines under the for-loop for the commented ones.
         for shop_name, shop_items in ITEMS_BY_SHOP.items():
-            eligible = shop_items if opts.include_cut_content else [
-                n for n in shop_items if not ITEM_ITEMS[n].cut_content
-            ]
-            count = min(opts.starting_items.value, len(eligible))
-            for item_name in self.random.sample(eligible, count):
+            # eligible = shop_items if opts.include_cut_content else [
+            #     n for n in shop_items if not ITEM_ITEMS[n].cut_content
+            # ]
+            # count = min(opts.starting_items.value, len(eligible))
+            # for item_name in self.random.sample(eligible, count):
+            count = min(opts.starting_items.value, len(shop_items))
+            for item_name in self.random.sample(shop_items, count):
                 self.multiworld.push_precollected(self.create_item(item_name))
                 self.precollected_names.add(item_name)
 
         # Pre-collect starting perks
+        # DISABLED (kept for later re-wiring, not deleted) - same
+        # cut-content exclusion as starting shop items above.
+        # perk_names = list(PERK_ITEMS.keys()) if opts.include_cut_content else [
+        #     n for n in PERK_ITEMS if not PERK_ITEMS[n].cut_content
+        # ]
         perk_names = list(PERK_ITEMS.keys())
         perk_start_count = min(opts.starting_perks.value, len(perk_names))
         for perk_name in self.random.sample(perk_names, perk_start_count):
             self.multiworld.push_precollected(self.create_item(perk_name))
             self.precollected_names.add(perk_name)
 
-        # Sphere-based shops (if enabled): split every Common-tier item, and
-        # separately every Common-tier perk, as evenly as possible into 3
-        # groups. Rare/Ultra Rare items+perks aren't split - they're a
-        # single combined "everything else" bucket the game mod opens up at
-        # the last round bracket (65/70/75/79), not further divided.
-        common_item_ids = [d.game_id for d in ITEM_ITEMS.values() if d.tier == 0]
-        self.random.shuffle(common_item_ids)
-        self.sphere_items = {1: [], 2: [], 3: []}
-        for i, game_id in enumerate(common_item_ids):
-            self.sphere_items[(i % 3) + 1].append(game_id)
-
-        common_perk_ids = [d.perk_id for d in PERK_ITEMS.values() if d.tier == 0]
-        self.random.shuffle(common_perk_ids)
-        self.sphere_perks = {1: [], 2: [], 3: []}
-        for i, perk_id in enumerate(common_perk_ids):
-            self.sphere_perks[(i % 3) + 1].append(perk_id)
+        # Zone-based shops (if enabled): split every AP-tracked item as
+        # evenly as possible into 4 groups, one per zone (1-4) - the game
+        # mod restricts the Normal Shop's pool to a zone's own group while
+        # global.Zone is 1-4, and leaves zone 5 (round 81+, endless)
+        # completely unrestricted. Flat split across every tier (no
+        # Common/Rare/Ultra-Rare stratification) - replaces the old
+        # sphere-based system, which only split Common-tier items across 3
+        # round-number brackets and left Rare/Ultra Rare as a single
+        # always-later bucket.
+        all_item_ids = [d.game_id for d in ITEM_ITEMS.values()]
+        self.random.shuffle(all_item_ids)
+        self.zone_items = {1: [], 2: [], 3: [], 4: []}
+        for i, game_id in enumerate(all_item_ids):
+            self.zone_items[(i % 4) + 1].append(game_id)
 
     # ── create_regions: AP calls this with only self ──────────────────────────
 
@@ -200,16 +208,24 @@ class NubbyNumberFactoryWorld(World):
                 pool.append(self.create_item(name))
 
         # All shop items, minus any already precollected as starting items.
-        # Cut-content items (Professor Palmy, Test Item 2) only exist in the
-        # pool at all if include_cut_content is on.
-        for name, data in ITEM_ITEMS.items():
-            if data.cut_content and not self.options.include_cut_content:
-                continue
+        # DISABLED (kept for later re-wiring, not deleted) - cut-content
+        # items (Professor Palmy, Test Item 2) only existed in the pool if
+        # include_cut_content was on. To re-enable: swap the for-loop body
+        # for the commented lines.
+        for name in ITEM_ITEMS:
+            # for name, data in ITEM_ITEMS.items():
+            #     if data.cut_content and not self.options.include_cut_content:
+            #         continue
             if name not in self.precollected_names:
                 pool.append(self.create_item(name))
 
         # All perks, minus any already precollected as starting perks
+        # DISABLED (kept for later re-wiring, not deleted) - same
+        # cut-content gate as shop items above, for the six demo perks.
         for name in PERK_ITEMS:
+            # for name, data in PERK_ITEMS.items():
+            #     if data.cut_content and not self.options.include_cut_content:
+            #         continue
             if name not in self.precollected_names:
                 pool.append(self.create_item(name))
 
@@ -239,13 +255,31 @@ class NubbyNumberFactoryWorld(World):
         # minority risk rather than dominating every shop visit; shuffled
         # once so the round-robin fill below doesn't always start on the
         # same entry.
+        #
+        # nubby_filler_percent carves out its own share of the padding
+        # first (a flat percentage of the total padding slots, rounded),
+        # entirely separate from the filler/trap weighting above - "Filler:
+        # Nubby" never competes for a slot against Permanent Coins/Extra
+        # Life/traps, it just claims its configured percentage up front and
+        # the remainder is split among the other filler/trap types exactly
+        # as before.
         total_locations = len(self.multiworld.get_unfilled_locations(self.player))
-        filler_needed   = total_locations - len(pool)
-        filler_names    = list(FILLER_ITEMS.keys()) * 3
+        filler_needed   = max(0, total_locations - len(pool))
+        nubby_count     = round(filler_needed * (self.options.nubby_filler_percent.value / 100))
+        nubby_count     = min(nubby_count, filler_needed)
+        for _ in range(nubby_count):
+            pool.append(self.create_item("Filler: Nubby"))
+
+        filler_names = (list(FILLER_ITEMS.keys()) + list(EXTRA_FILLER_ITEMS.keys())) * 3
         if self.options.include_traps:
-            filler_names = filler_names + list(TRAP_ITEMS.keys())
+            # Item Steal/Item Jam weighted well above the other 3 traps (6
+            # of 9 trap entries, ~67% of the trap pool specifically) per
+            # explicit request - Near Death/Coin Theft/Chaos Event stay at
+            # their original 1x weight.
+            filler_names = filler_names + (["Trap: Item Steal"] * 3 + ["Trap: Item Jam"] * 3
+                                            + ["Trap: Coin Theft", "Trap: Near Death", "Trap: Chaos Event"])
         self.random.shuffle(filler_names)
-        for i in range(max(0, filler_needed)):
+        for i in range(filler_needed - nubby_count):
             pool.append(self.create_item(filler_names[i % len(filler_names)]))
 
         # Supervisors + shop items + perks + cosmetics can add up to more
@@ -287,11 +321,16 @@ class NubbyNumberFactoryWorld(World):
         data: Dict[str, Any] = {
             "goal_supervisors": self.goal_supervisors,
             "required_count":   self.required_count,
+            # Always sent (not gated on truthiness like the toggles below) -
+            # both default ON, so a client that only checked for presence
+            # would wrongly treat an absent key as "off" for the common case.
+            "include_item_purchases": bool(self.options.include_item_purchases),
+            "include_perks": bool(self.options.include_perks),
+            "points_check_count": self.options.points_check_count.value,
         }
-        if self.options.sphere_based_shops:
-            data["sphere_based_shops"] = True
-            data["sphere_items"] = self.sphere_items
-            data["sphere_perks"] = self.sphere_perks
+        if self.options.zone_based_shops:
+            data["zone_based_shops"] = True
+            data["zone_items"] = self.zone_items
         if self.options.lock_zones:
             data["lock_zones"] = True
             data["lock_zone5"] = bool(self.options.lock_zone5)
@@ -302,6 +341,8 @@ class NubbyNumberFactoryWorld(World):
             data["custom_final_round"] = self.options.custom_final_round.value
         if self.options.score_goal:
             data["score_goal"] = self.options.score_goal.value
+        if self.options.include_traps:
+            data["include_traps"] = True
         return data
 
     # ── Item name groups (for hints, etc.) ────────────────────────────────────

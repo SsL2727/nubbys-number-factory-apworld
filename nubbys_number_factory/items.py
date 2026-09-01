@@ -25,7 +25,7 @@ class NNFItemData(NamedTuple):
     perk_id: int = -1        # internal perk id (InPerkItemPool); -1 = n/a
     bonus: int = 0           # for filler: permanent amount granted (money or lives)
     tier: int = -1           # ItemTier/PerkTier from the game itself: 0=Common, 1=Rare, 2=Ultra Rare, -1=n/a
-    cut_content: bool = False  # restored cut content - only in the pool if NNFOptions.include_cut_content
+    # cut_content: bool = False  # DISABLED (kept for later re-wiring, not deleted) - was: restored cut content, only in the pool if NNFOptions.include_cut_content
 
 
 # ── SUPERVISOR UNLOCKS ────────────────────────────────────────────────────────
@@ -126,16 +126,18 @@ ITEM_ITEMS: Dict[str, NNFItemData] = {
     "Item: Donut":              NNFItemData(BASE_ID+2067, ItemClassification.progression,  19,  "cafe", tier=2),
     "Item: Starfruit":          NNFItemData(BASE_ID+2068, ItemClassification.progression,  146, "cafe", tier=2),
 
-    # ── Restored cut content (see NNFOptions.include_cut_content) ─────────────
-    # Both fully implemented in vanilla (real Create_0/Alarm_0 object code,
-    # real name/desc text keys, real "+" upgrade pair) but shipped with
-    # InItemPool hardcoded to 0 - i.e. deliberately excluded from every shop's
-    # roll rather than left unfinished. Confirmed via decompile of
-    # obj_ItemMGMT_Create_0's scr_Init_Item calls (game_id/tier taken
-    # directly from arg0/arg5). No strong in-game signal for which shop they
-    # were meant for, so both default to Normal Shop.
-    "Item: Professor Palmy":    NNFItemData(BASE_ID+2069, ItemClassification.useful,       57,  "normal", tier=0, cut_content=True),
-    "Item: Test Item 2":        NNFItemData(BASE_ID+2070, ItemClassification.useful,       26,  "normal", tier=1, cut_content=True),
+    # DISABLED (kept for later re-wiring, not deleted) - restored cut
+    # content. Both fully implemented in vanilla (real Create_0/Alarm_0
+    # object code, real name/desc text keys, real "+" upgrade pair) but
+    # shipped with InItemPool hardcoded to 0 - i.e. deliberately excluded
+    # from every shop's roll rather than left unfinished. Confirmed via
+    # decompile of obj_ItemMGMT_Create_0's scr_Init_Item calls (game_id/
+    # tier taken directly from arg0/arg5). To re-enable: uncomment these,
+    # restore the cut_content field above, restore the matching GML #if
+    # false block (item-side ApOriginalItemPool[57]/[26] override), and
+    # restore include_cut_content in options.py/__init__.py/NubbyClient.py.
+    # "Item: Professor Palmy":    NNFItemData(BASE_ID+2069, ItemClassification.useful,       57,  "normal", tier=0, cut_content=True),
+    # "Item: Test Item 2":        NNFItemData(BASE_ID+2070, ItemClassification.useful,       26,  "normal", tier=1, cut_content=True),
 }
 
 # Perks - a second, parallel randomized category (obj_PerkMGMT.InPerkItemPool,
@@ -174,14 +176,62 @@ PERK_ITEMS: Dict[str, NNFItemData] = {
     "Perk: Battery":       NNFItemData(BASE_ID+5005, ItemClassification.progression, perk_id=5, tier=2),
     "Perk: Penny":         NNFItemData(BASE_ID+5014, ItemClassification.progression, perk_id=14, tier=2),
     "Perk: Enlightened":   NNFItemData(BASE_ID+5025, ItemClassification.progression, perk_id=25, tier=2),
+
+    # DISABLED (kept for later re-wiring, not deleted) - six restored
+    # demo-exclusive perks (Gambley/Jittery/Lucky/Rocky/Wizardry/Silly),
+    # per nubbysnumberfactory.wiki.gg/wiki/Cut_Content. Unlike Professor
+    # Palmy/Test Item 2 above (real, pool-disabled objects that already
+    # shipped in this build), these six have ZERO trace anywhere in this
+    # game's decompiled corpus - genuinely demo-only content, rebuilt from
+    # scratch (new GameObjects, ids 33-38, real wiki-sourced sprites) using
+    # the wiki's own description text as the spec. To re-enable: uncomment
+    # these, restore the cut_content field above, restore the matching GML
+    # #if false blocks (six-perk object/sprite/code creation, the
+    # obj_PerkMGMT_Create_0 registration + _apPerkIds extension, the
+    # obj_LvlMGMT_Create_0 Gambley/Lucky hooks, the obj_ItemParent_Alarm_0
+    # Wizardry hook, the scr_GameEv Silly hooks), and restore
+    # include_cut_content in options.py/__init__.py/NubbyClient.py.
+    # "Perk: The Gambley Perk":  NNFItemData(BASE_ID+5033, ItemClassification.useful, perk_id=33, tier=0, cut_content=True),
+    # "Perk: The Jittery Perk":  NNFItemData(BASE_ID+5034, ItemClassification.useful, perk_id=34, tier=0, cut_content=True),
+    # "Perk: The Lucky Perk":    NNFItemData(BASE_ID+5035, ItemClassification.useful, perk_id=35, tier=0, cut_content=True),
+    # "Perk: The Rocky Perk":    NNFItemData(BASE_ID+5036, ItemClassification.useful, perk_id=36, tier=0, cut_content=True),
+    # "Perk: The Wizardry Perk": NNFItemData(BASE_ID+5037, ItemClassification.useful, perk_id=37, tier=0, cut_content=True),
+    # "Perk: The Silly Perk":    NNFItemData(BASE_ID+5038, ItemClassification.useful, perk_id=38, tier=1, cut_content=True),
 }
 
 # Filler - permanent, small, run-independent bonuses applied once at the
 # start of every run by the game mod (not per-run currency/lives, which
 # reset - these stack permanently across the whole AP session).
 FILLER_ITEMS: Dict[str, NNFItemData] = {
-    "Permanent Coins":      NNFItemData(BASE_ID+3000, ItemClassification.filler, bonus=5),
+    "Permanent Coins":      NNFItemData(BASE_ID+3000, ItemClassification.filler, bonus=10),
     "Permanent Extra Life": NNFItemData(BASE_ID+3001, ItemClassification.filler, bonus=1),
+}
+
+# Two more permanent, stacking bonuses - same "applied once at run start"
+# mechanism as FILLER_ITEMS above, kept in a separate dict purely so they
+# were easy to add without touching FILLER_ITEMS's own definition.
+# create_items() weights these identically to FILLER_ITEMS in the padding
+# pool.
+#   - Permanent Board Shuffle: +1 stacking JumbleCharges (the real in-game
+#     "jumbling"/board-shuffle resource, confirmed via decompile).
+#   - Permanent Item Rarity: +2% stacking odds for rare shop items (the
+#     game's own Comn/Rare/UltraRare odds are out of 1000 - confirmed via
+#     decompile ComnOdds=950/RareOdds=50/UltraRareOdds=2 - and the wiki's
+#     own Avocado effect, "+1% odds for rare items", which is this same
+#     mechanic; bonus=2 below is in the same "percent" unit as Avocado's
+#     own effect, translated to the 1000-point scale in the GML patch).
+EXTRA_FILLER_ITEMS: Dict[str, NNFItemData] = {
+    "Permanent Board Shuffle": NNFItemData(BASE_ID+3003, ItemClassification.filler, bonus=1),
+    "Permanent Item Rarity":   NNFItemData(BASE_ID+3004, ItemClassification.filler, bonus=2),
+}
+
+# Pure no-op filler - does nothing on arrival, just occupies a pool slot.
+# Kept separate from FILLER_ITEMS (rather than folded in with a 0 bonus)
+# since its share of the padding is its own configurable percentage (see
+# NNFOptions.nubby_filler_percent) instead of the flat weighting the other
+# two filler/trap types get in create_items().
+NUBBY_FILLER_ITEMS: Dict[str, NNFItemData] = {
+    "Filler: Nubby": NNFItemData(BASE_ID+3002, ItemClassification.filler),
 }
 
 # Cosmetic unlocks - not shop items, not tracked by game_id/InItemPool.
@@ -241,6 +291,8 @@ ALL_ITEMS: Dict[str, NNFItemData] = {
     **ITEM_ITEMS,
     **PERK_ITEMS,
     **FILLER_ITEMS,
+    **EXTRA_FILLER_ITEMS,
+    **NUBBY_FILLER_ITEMS,
     **COSMETIC_ITEMS,
     **ZONE_ITEMS,
     **LOCK_ITEMS,

@@ -97,19 +97,53 @@ class IncludePerks(Toggle):
     default = 1
 
 
-class SphereBasedShops(Toggle):
+class IncludeRoundMilestones(Toggle):
     """
-    If enabled, the Normal Shop's item pool at each of its 14 fixed
-    checkpoint rounds (5/10/19 - 25/30/35/39 - 45/50/59 - 65/70/75/79) is
-    restricted to a specific slice of the game's own Common/Rare/Ultra Rare
-    item tiers: the 44 Common items are split as evenly as possible into 3
-    groups (one per round bracket), and the final bracket (65/70/75/79)
-    opens up to everything else (Rare + Ultra Rare). This paces which items
-    can appear based on how far into a run the shop is, rather than the
-    full unlocked pool being available from round 5 onward. Only affects
-    the Normal Shop - Black Market and Cafe are unaffected.
+    If enabled, "Reach Round N" locations are included for the first-time
+    completion of round 5, 10, 15, ... up to 80, for 16 additional checks.
     """
-    display_name = "Sphere-Based Shops"
+    display_name = "Include Round Milestone Checks"
+    default = 1
+
+
+class IncludeRestockMilestones(Toggle):
+    """
+    If enabled, locations are included for the first time a single round's
+    restocks reach 1, 2, 5, 10, 50, 100, 500, 1000, 2000, 3000, 4000, 5000,
+    6000, 7000, 8000, 9000, or 9999 - restocks only count together if
+    obtained within the same round. 17 checks total.
+    """
+    display_name = "Include Restock Milestone Checks"
+    default = 1
+
+
+class PointsCheckCount(Range):
+    """
+    How many "Reach N Points" locations are included. Points accumulate
+    from a lifetime total that persists across runs: completing a round
+    awards 1 point for rounds 1-5, 2 points for rounds 6-10, 3 points for
+    rounds 11-15, and so on, increasing by 1 every 5 rounds. Locations are
+    placed for reaching 1, 2, 3, ... up to this many points.
+    """
+    display_name = "Points Check Count"
+    range_start = 10
+    range_end = 500
+    default = 100
+
+
+class ZoneBasedShops(Toggle):
+    """
+    If enabled, the Normal Shop's AP-tracked item pool is split as evenly
+    as possible into 4 groups, one per zone (Zone 1 = rounds 1-20, Zone 2 =
+    21-40, Zone 3 = 41-60, Zone 4 = 61-80) - only that zone's own group is
+    purchasable while you're in it. Zone 5 (round 81+, endless) lifts the
+    restriction entirely: every AP-tracked item becomes purchasable there.
+    This paces which items can appear based on how far into a run the shop
+    is, rather than the full unlocked pool being available from round 5
+    onward. Only affects the Normal Shop - Black Market and Cafe are
+    unaffected.
+    """
+    display_name = "Zone-Based Shops"
     default = 0
 
 
@@ -208,15 +242,33 @@ class IncludeTraps(Toggle):
     default = 0
 
 
-class IncludeCutContent(Toggle):
+class NubbyFillerPercent(Range):
     """
-    If enabled, two fully-implemented but pool-disabled vanilla items
-    (Professor Palmy, Test Item 2 - shipped with InItemPool hardcoded to
-    0, excluding them from every shop) are added to the Normal Shop's
-    randomized pool as real obtainable items.
+    What percentage of the pool's padding slots are "Filler: Nubby" -
+    a no-op filler item that does nothing on arrival.
     """
-    display_name = "Include Cut Content"
-    default = 0
+    display_name = "Nubby Filler Percent"
+    range_start = 0
+    range_end = 100
+    default = 20
+
+
+# DISABLED (kept for later re-wiring, not deleted) - see the matching
+# blocks in items.py/__init__.py/NubbyClient.py and the #if false blocks
+# in the GML master script. To re-enable: uncomment this class, add
+# `include_cut_content: IncludeCutContent` back to NNFOptions below, and
+# restore the matching blocks in the other files.
+# class IncludeCutContent(Toggle):
+#     """
+#     If enabled, two fully-implemented but pool-disabled vanilla items
+#     (Professor Palmy, Test Item 2 - shipped with InItemPool hardcoded to
+#     0, excluding them from every shop) and six restored demo-exclusive
+#     perks (Gambley/Jittery/Lucky/Rocky/Wizardry/Silly, rebuilt from the
+#     wiki since they have no trace in this game's own files) are added to
+#     the randomized pool as real obtainable items/perks.
+#     """
+#     display_name = "Include Cut Content"
+#     default = 0
 
 
 class CustomFinalRound(Range):
@@ -248,11 +300,11 @@ class ScoreGoal(Range):
 
 class IncludeItemPurchases(Toggle):
     """
-    If enabled, "AP Item Purchase" locations are included for all 69 shop
-    items (sent by buying the dedicated AP Item shop slot while it
-    represents that location), for up to 69 additional checks.
+    If enabled, each round that hosts a shop sells exactly one Archipelago
+    item; once bought, that round's shop never offers another for the rest
+    of the game. Up to 69 checks total.
     """
-    display_name = "Include First-Purchase Checks"
+    display_name = "Include Shop Item Checks"
     default = 1
 
 
@@ -267,7 +319,11 @@ class NNFOptions(PerGameCommonOptions):
     include_nubby_trials: IncludeNubbyTrials
     include_item_purchases: IncludeItemPurchases
     include_perks: IncludePerks
-    sphere_based_shops: SphereBasedShops
+    include_round_milestones: IncludeRoundMilestones
+    include_restock_milestones: IncludeRestockMilestones
+    points_check_count: PointsCheckCount
+    # include_cut_content: IncludeCutContent  # DISABLED (kept for later re-wiring, not deleted)
+    zone_based_shops: ZoneBasedShops
     lock_zones: LockZones
     lock_zone5: LockZone5
     lock_grabatron: LockGrabATron
@@ -277,6 +333,6 @@ class NNFOptions(PerGameCommonOptions):
     lock_challenges: LockChallenges
     lock_freeze_ability: LockFreezeAbility
     include_traps: IncludeTraps
-    include_cut_content: IncludeCutContent
+    nubby_filler_percent: NubbyFillerPercent
     custom_final_round: CustomFinalRound
     score_goal: ScoreGoal

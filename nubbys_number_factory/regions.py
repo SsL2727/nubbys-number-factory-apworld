@@ -1,8 +1,8 @@
 """
 Regions for Nubby's Number Factory Archipelago Randomizer
 V4: Save-native rebuild - Zone regions removed (no persisted signal exists
-    for them). Shop is back, since purchases are now detected via
-    NUBBY_AutoSave.save: A_BoughtItems.
+    for them). Shop is back, since purchases are now detected via a one-shot
+    purchase signal file from the dedicated AP Item shop slot.
 
 Region structure:
   Menu
@@ -16,7 +16,8 @@ from typing import Dict
 from BaseClasses import MultiWorld, Region, Entrance, Location
 from .locations import (
     NNFLocationData, SUPERVISOR_LOCATIONS, CHALLENGE_LOCATIONS,
-    NUBBY_TRIALS_LOCATIONS, ITEM_PURCHASE_LOCATIONS, PERK_LOCATIONS
+    NUBBY_TRIALS_LOCATIONS, SHOP_LOCATIONS,
+    ROUND_MILESTONE_LOCATIONS, RESTOCK_MILESTONE_LOCATIONS, POINTS_LOCATIONS
 )
 from .options import NNFOptions
 
@@ -38,7 +39,9 @@ def create_regions(world: MultiWorld, player: int, options: NNFOptions) -> None:
     challenges_region = Region("Challenges", player, world)
     trials_region     = Region("Nubby Trials", player, world)
     shop_region       = Region("Shop", player, world)
-    perks_region      = Region("Perks", player, world)
+    milestones_region = Region("Milestones", player, world)
+    restocks_region   = Region("Restocks", player, world)
+    points_region     = Region("Points", player, world)
 
     # ── Add location objects to regions ──────────────────────────────────────
     def _add_locations(region: Region, loc_dict: Dict[str, NNFLocationData]) -> None:
@@ -62,10 +65,18 @@ def create_regions(world: MultiWorld, player: int, options: NNFOptions) -> None:
         _add_locations(trials_region, NUBBY_TRIALS_LOCATIONS)
 
     if options.include_item_purchases:
-        _add_locations(shop_region, ITEM_PURCHASE_LOCATIONS)
+        _add_locations(shop_region, SHOP_LOCATIONS)
 
-    if options.include_perks:
-        _add_locations(perks_region, PERK_LOCATIONS)
+    if options.include_round_milestones:
+        _add_locations(milestones_region, ROUND_MILESTONE_LOCATIONS)
+
+    if options.include_restock_milestones:
+        _add_locations(restocks_region, RESTOCK_MILESTONE_LOCATIONS)
+
+    points_subset = {
+        name: data for name, data in list(POINTS_LOCATIONS.items())[:options.points_check_count.value]
+    }
+    _add_locations(points_region, points_subset)
 
     # ── Connect Menu → Supervisor regions (require unlock item) ───────────────
     for sv_num, sv_region in supervisor_regions.items():
@@ -75,13 +86,13 @@ def create_regions(world: MultiWorld, player: int, options: NNFOptions) -> None:
         menu_region.exits.append(entrance)
         entrance.connect(sv_region)
 
-    # ── Connect Menu → Challenges / Trials / Shop / Perks (always accessible) ─
-    for region in [challenges_region, trials_region, shop_region, perks_region]:
+    # ── Connect Menu → Challenges / Trials / Shop / Milestones / Restocks / Points (always accessible) ─
+    for region in [challenges_region, trials_region, shop_region, milestones_region, restocks_region, points_region]:
         entrance = Entrance(player, f"Access {region.name}", menu_region)
         entrance.access_rule = lambda state: True
         menu_region.exits.append(entrance)
         entrance.connect(region)
 
     # ── Register all regions with the multiworld ──────────────────────────────
-    world.regions += [menu_region, challenges_region, trials_region, shop_region, perks_region]
+    world.regions += [menu_region, challenges_region, trials_region, shop_region, milestones_region, restocks_region, points_region]
     world.regions += list(supervisor_regions.values())
