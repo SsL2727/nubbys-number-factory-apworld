@@ -29,8 +29,6 @@ In the client, run:
 
 This locates your game install, downloads UndertaleModCli the first time it's needed (a small one-time download from UndertaleModTool's own GitHub releases), backs up your original `data.win`, and applies the AP patch automatically. Close the game first if it's running - `/patch` won't touch `data.win` while it's open. Once it finishes, fully restart the game.
 
-That's it - no UndertaleModTool install or manual steps required for the common case.
-
 ### 4. (Optional) PopTracker
 
 Open [PopTracker](https://github.com/black-sliver/PopTracker), load `poptracker_pack/nnf_poptracker_pack.zip` as a pack, and connect it to the same session for a visual check tracker.
