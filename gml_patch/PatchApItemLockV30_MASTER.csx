@@ -7,7 +7,11 @@ using UndertaleModLib.Compiler;
 
 EnsureDataLoaded();
 
-string decompFolder = @"F:\Nubby's Number Facotry AP\decompiled_source";
+// NNF_DECOMP_FOLDER lets the AP client's automated /patch command point this
+// at a per-run temp folder it decompiled itself on the end user's machine,
+// without touching this default (my own dev-machine path, used for every
+// manual rebuild this project's development has relied on all along).
+string decompFolder = Environment.GetEnvironmentVariable("NNF_DECOMP_FOLDER") ?? @"F:\Nubby's Number Facotry AP\decompiled_source";
 
 // --- CHANGED in V20: item-pool lock/unlock + empty-tier safety net, PLUS a
 // Black-Market-specific safety net (V12, corrected here). V12 originally

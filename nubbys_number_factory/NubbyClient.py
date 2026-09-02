@@ -39,8 +39,10 @@ import json
 import time
 import random
 import shutil
+import pkgutil
 import asyncio
 import subprocess
+import zipfile
 
 import Utils
 from NetUtils import ClientStatus
@@ -1293,6 +1295,170 @@ def _game_already_running():
         return False
 
 
+# ── /patch: apply the AP integration to the player's own data.win ──────────
+#
+# Replaces the old "install UndertaleModTool, decompile, hand-edit a path,
+# run the CLI yourself" setup step with one in-client command. Two scripts
+# ship alongside this file inside the apworld (ExportAllCodeHeadless.csx and
+# PatchApItemLockV30_MASTER.csx - the same master patch script this whole
+# project's dev builds are compiled from) and UndertaleModCli itself is
+# downloaded once from UndertaleModTool's own GitHub releases and cached
+# under NubbyAP/tools, rather than bundled here - keeps this apworld itself
+# small, and always fetches a build that matches whatever's current.
+UTMT_DIR = os.path.join(SAVE_FOLDER, "tools", "UndertaleModCli")
+UTMT_EXE = os.path.join(UTMT_DIR, "UndertaleModCli.exe")
+UTMT_RELEASE_API = "https://api.github.com/repos/UnderminersTeam/UndertaleModTool/releases/latest"
+DECOMPILE_SCRIPT_NAME = "ExportAllCodeHeadless.csx"
+PATCH_SCRIPT_NAME = "PatchApItemLockV30_MASTER.csx"
+
+
+def _extract_bundled_script(name):
+    """
+    UndertaleModCli runs as a separate process, so it needs a real file on
+    disk - but Archipelago can load this apworld either as an extracted
+    folder or directly out of the .apworld zip via zipimport (confirmed:
+    the official worlds folder ships plenty of worlds as bare .apworld
+    files sitting right next to the extracted ones), in which case
+    __file__-relative paths point inside the zip and plain open()/subprocess
+    can't read them. pkgutil.get_data() abstracts over both cases, so this
+    always writes the script out to a real cache file first and hands back
+    that path instead of a path next to this module.
+    """
+    data = pkgutil.get_data(__package__ or __name__.rsplit(".", 1)[0], name)
+    if data is None:
+        raise FileNotFoundError(f"couldn't read bundled script {name} from this apworld package")
+    tools_dir = os.path.join(SAVE_FOLDER, "tools")
+    os.makedirs(tools_dir, exist_ok=True)
+    out_path = os.path.join(tools_dir, name)
+    with open(out_path, "wb") as f:
+        f.write(data)
+    return out_path
+
+
+async def _ensure_utmt(log):
+    if os.path.isfile(UTMT_EXE):
+        return True
+    log("UndertaleModCli not found - downloading it once from UndertaleModTool's official GitHub release...")
+
+    def _download():
+        import urllib.request
+        # GitHub's API rejects requests with no User-Agent header (403), so
+        # this can't just use urlretrieve/urlopen with no headers.
+        req = urllib.request.Request(UTMT_RELEASE_API, headers={"User-Agent": "NubbyAP-Client"})
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            release = json.loads(resp.read())
+        asset = next(
+            (a for a in release.get("assets", [])
+             if "UTMT_CLI" in a["name"] and "Windows" in a["name"]
+             and "macOS" not in a["name"] and "Ubuntu" not in a["name"]),
+            None,
+        )
+        if asset is None:
+            raise RuntimeError("couldn't find a Windows UTMT_CLI asset in the latest UndertaleModTool release")
+        tools_dir = os.path.join(SAVE_FOLDER, "tools")
+        os.makedirs(tools_dir, exist_ok=True)
+        zip_path = os.path.join(tools_dir, asset["name"])
+        dl_req = urllib.request.Request(asset["browser_download_url"], headers={"User-Agent": "NubbyAP-Client"})
+        with urllib.request.urlopen(dl_req, timeout=120) as resp, open(zip_path, "wb") as f:
+            shutil.copyfileobj(resp, f)
+        os.makedirs(UTMT_DIR, exist_ok=True)
+        with zipfile.ZipFile(zip_path) as z:
+            z.extractall(UTMT_DIR)
+        os.remove(zip_path)
+
+    try:
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, _download)
+    except Exception as e:
+        log(f"Failed to download UndertaleModCli: {e}")
+        return False
+    if not os.path.isfile(UTMT_EXE):
+        log("Download finished but UndertaleModCli.exe still wasn't found - the release layout may have changed.")
+        return False
+    log("UndertaleModCli ready.")
+    return True
+
+
+async def _run_patch_flow(ctx):
+    def log(msg):
+        print(f"[NubbyAP] {msg}")
+        ctx.output(msg)
+
+    if _game_already_running():
+        log("Close Nubby's Number Factory first, then run /patch again - "
+            "data.win can't be safely replaced while the game is running.")
+        return
+
+    exe_path = _find_game_exe()
+    if not exe_path:
+        log("Couldn't locate the game install - can't patch.")
+        return
+    game_dir = os.path.dirname(exe_path)
+    live_data_win = os.path.join(game_dir, "data.win")
+    if not os.path.isfile(live_data_win):
+        log(f"data.win not found at {live_data_win}")
+        return
+
+    if not await _ensure_utmt(log):
+        return
+
+    # The very first /patch run backs up whatever's there (a fresh install's
+    # true vanilla data.win) and always patches FROM that backup afterward -
+    # never from whatever's currently live - so re-running /patch (e.g. after
+    # a game update overwrote data.win with a fresh vanilla copy) reapplies
+    # cleanly instead of patching an already-patched file a second time.
+    backup_path = os.path.join(game_dir, "data.win.pre_ap_patch_backup")
+    if not os.path.exists(backup_path):
+        shutil.copy2(live_data_win, backup_path)
+        log(f"Backed up your original data.win to {backup_path}")
+    else:
+        log("Patching from your existing pre-AP-patch backup (so re-running /patch never double-patches).")
+
+    decomp_dir = os.path.join(SAVE_FOLDER, "tools", "decompiled_source")
+    if os.path.isdir(decomp_dir):
+        shutil.rmtree(decomp_dir)
+    os.makedirs(decomp_dir, exist_ok=True)
+
+    loop = asyncio.get_event_loop()
+
+    def _run_utmt(args, env_extra):
+        env = os.environ.copy()
+        env.update(env_extra)
+        return subprocess.run(
+            [UTMT_EXE] + args,
+            capture_output=True, text=True, timeout=600, env=env, cwd=UTMT_DIR,
+        )
+
+    log("Decompiling your data.win (one-time per patch, this can take a minute)...")
+    result = await loop.run_in_executor(
+        None,
+        lambda: _run_utmt(
+            ["load", backup_path, "-s", _extract_bundled_script(DECOMPILE_SCRIPT_NAME)],
+            {"NNF_DECOMP_FOLDER": decomp_dir},
+        ),
+    )
+    if result.returncode != 0 or not os.listdir(decomp_dir):
+        log(f"Decompile step failed: {(result.stderr or result.stdout).strip()[-500:]}")
+        return
+
+    patched_path = os.path.join(game_dir, "data.win.ap_patched")
+    log("Applying the AP patch...")
+    result = await loop.run_in_executor(
+        None,
+        lambda: _run_utmt(
+            ["load", backup_path, "-s", _extract_bundled_script(PATCH_SCRIPT_NAME), "-o", patched_path],
+            {"NNF_DECOMP_FOLDER": decomp_dir},
+        ),
+    )
+    if result.returncode != 0 or not os.path.isfile(patched_path):
+        log(f"Patch step failed: {(result.stderr or result.stdout).strip()[-500:]}")
+        return
+
+    shutil.copy2(patched_path, live_data_win)
+    os.remove(patched_path)
+    log("data.win patched successfully! Fully close and restart the game for the changes to take effect.")
+
+
 def launch_game_if_needed():
     if _game_already_running():
         print("[NubbyAP] Game already running, not launching a second copy.")
@@ -1331,6 +1497,12 @@ class NubbyCommandProcessor(ClientCommandProcessor):
                 pass
             self.ctx.syncing = True
             self.output("Resyncing items and locations...")
+
+    def _cmd_patch(self):
+        """Patch your own data.win with the AP integration - no manual UndertaleModTool steps needed."""
+        if isinstance(self.ctx, NubbyContext):
+            self.output("Starting patch process - this can take a minute or two, especially the first run...")
+            async_start(_run_patch_flow(self.ctx))
 
     def _cmd_backup_now(self):
         """Take an immediate backup snapshot of the current save."""
