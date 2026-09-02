@@ -26,14 +26,26 @@ class NNFLocation(Location):
     game: str = "Nubby's Number Factory"
 
 
-def create_regions(world: MultiWorld, player: int, options: NNFOptions) -> None:
-    """Build all regions and connect them with access rules."""
+def create_regions(world: MultiWorld, player: int, options: NNFOptions, goal_supervisors) -> None:
+    """
+    Build all regions and connect them with access rules.
+
+    goal_supervisors is generate_early's random.sample(range(1, 12), ...) -
+    the SV indices actually in scope for this seed. Only those get a region/
+    location/entrance: create_items only ever creates "Supervisor N Unlock"
+    items for indices in this set, so a supervisor left out of it can never
+    be unlocked - building its "Win Supervisor N" location and entrance
+    anyway (the old unconditional range(1, 12) here) left that location
+    permanently unreachable whenever supervisors_in_pool < 11, which the
+    fuzzer caught immediately as a hard FillError ("Could not access
+    required locations for accessibility check").
+    """
 
     # ── Create region objects ─────────────────────────────────────────────────
     menu_region = Region("Menu", player, world)
 
     supervisor_regions: Dict[int, Region] = {}
-    for sv_num in range(1, 12):
+    for sv_num in goal_supervisors:
         supervisor_regions[sv_num] = Region(f"Supervisor {sv_num}", player, world)
 
     challenges_region = Region("Challenges", player, world)

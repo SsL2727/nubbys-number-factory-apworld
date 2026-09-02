@@ -179,7 +179,7 @@ class NubbyNumberFactoryWorld(World):
     # ── create_regions: AP calls this with only self ──────────────────────────
 
     def create_regions(self) -> None:
-        create_regions(self.multiworld, self.player, self.options)
+        create_regions(self.multiworld, self.player, self.options, self.goal_supervisors)
 
     # ── Item creation ─────────────────────────────────────────────────────────
 
@@ -289,9 +289,20 @@ class NubbyNumberFactoryWorld(World):
         # into *other* players' placements in a multiworld). If it's over,
         # trim randomly rather than always cutting the same tail of the
         # dict, so every item has an equal chance of making a given seed.
-        if len(pool) > total_locations:
-            self.random.shuffle(pool)
-        pool = pool[:total_locations]
+        #
+        # Supervisor Unlock items are exempt from trimming: create_regions
+        # gates every "Win Supervisor N" location (for N in goal_supervisors)
+        # behind exactly one specific "Supervisor N Unlock" item - nothing
+        # else can ever grant that access. The naive whole-pool shuffle used
+        # to trim these too, which the fuzzer caught immediately: a
+        # FillError where the affected supervisors' Unlock items were simply
+        # missing from the final placements entirely, not misplaced.
+        mandatory = [item for item in pool if item.name in SUPERVISOR_ITEMS]
+        trimmable = [item for item in pool if item.name not in SUPERVISOR_ITEMS]
+        if len(mandatory) + len(trimmable) > total_locations:
+            self.random.shuffle(trimmable)
+            trimmable = trimmable[:max(0, total_locations - len(mandatory))]
+        pool = mandatory + trimmable
 
         self.multiworld.itempool += pool
 
