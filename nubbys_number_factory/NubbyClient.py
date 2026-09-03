@@ -758,6 +758,26 @@ def activate_room_save(server_address, seed_name, slot_name, slot_data=None):
     os.makedirs(SLOTS_DIR, exist_ok=True)
     ensure_vanilla_backup()
 
+    # Checked on every connect/reconnect, not just once: this is the safety
+    # net for a real report where /patch silently failed to actually replace
+    # data.win (most likely a race against the game being launched mid-patch)
+    # but nothing caught it, so the player connected and this function went
+    # on to lock their save data (Tony/SV0, etc.) as if the game were
+    # patched - reproducing a genuine pre-existing vanilla crash the moment
+    # they visited supervisor select, since vanilla never expects a
+    # supervisor to be locked. This can't fix an unpatched game by itself,
+    # but makes the mismatch impossible to miss instead of silent.
+    exe_path = _find_game_exe()
+    if exe_path:
+        live_data_win = os.path.join(os.path.dirname(exe_path), "data.win")
+        if os.path.isfile(live_data_win) and not _is_data_win_patched(live_data_win):
+            print("[NubbyAP] " + "!" * 60)
+            print("[NubbyAP] WARNING: your data.win doesn't look patched!")
+            print("[NubbyAP] Run /patch before playing, or the game WILL crash")
+            print("[NubbyAP] (supervisors get locked in your save regardless of")
+            print("[NubbyAP] whether the game itself has been patched to expect that).")
+            print("[NubbyAP] " + "!" * 60)
+
     room_dir, manifest = _resolve_room_dir(server_address, seed_name, slot_name)
     room_save_dir = os.path.join(room_dir, "save")
     is_new_room = not os.path.isdir(room_save_dir)
@@ -1311,6 +1331,29 @@ UTMT_RELEASE_API = "https://api.github.com/repos/UnderminersTeam/UndertaleModToo
 DECOMPILE_SCRIPT_NAME = "ExportAllCodeHeadless.csx"
 PATCH_SCRIPT_NAME = "PatchApItemLockV30_MASTER.csx"
 
+# Confirmed root cause of a real crash report: a player's data.win was 100%
+# unpatched vanilla (verified by decompiling the exact file they sent -
+# obj_SupervisorMGMT_Create_0 was byte-identical to stock vanilla, and this
+# marker string - which appears 22x in a genuinely patched build, from every
+# "NubbyAP/..." file path this patch's GML injects - was entirely absent),
+# while their save file had Tony (SV0) locked, which only ever happens via
+# this client's own room-locking. /patch had silently failed for them (most
+# likely: the final data.win swap raced a still-running game holding the
+# file open, since /patch only checked once at the very start of a
+# multi-minute operation) and nothing ever verified success afterward, so
+# they connected and played an unpatched game with AP-locked save data -
+# which reproduces a real pre-existing vanilla bug that only manifests when
+# a supervisor is locked, something stock vanilla never does on its own.
+AP_PATCH_MARKER = b"NubbyAP"
+
+
+def _is_data_win_patched(data_win_path):
+    try:
+        with open(data_win_path, "rb") as f:
+            return AP_PATCH_MARKER in f.read()
+    except OSError:
+        return False
+
 
 def _extract_bundled_script(name):
     """
@@ -1454,7 +1497,37 @@ async def _run_patch_flow(ctx):
         log(f"Patch step failed: {(result.stderr or result.stdout).strip()[-500:]}")
         return
 
-    shutil.copy2(patched_path, live_data_win)
+    if not _is_data_win_patched(patched_path):
+        log("Patch step reported success but the output doesn't look patched (missing marker) - "
+            "not touching your live data.win. This shouldn't happen; please report it.")
+        return
+
+    # Re-check right before the swap, not just at the very start - this is a
+    # multi-minute operation (decompile + compile a ~70MB file), long enough
+    # for the game to have been launched in the meantime. Swapping data.win
+    # out from under a running game can silently fail (the file is open/
+    # locked) or corrupt the copy - confirmed as the likely cause of a real
+    # report where every earlier step had clearly succeeded (a correct
+    # patched_path existed) but the live data.win was still untouched
+    # vanilla afterward.
+    if _game_already_running():
+        log("The game was launched while this was running - close it now, "
+            f"then run /patch again. Your correctly-patched file is saved at {patched_path} "
+            "in the meantime, so nothing needs to be redone from scratch.")
+        return
+
+    try:
+        shutil.copy2(patched_path, live_data_win)
+    except OSError as e:
+        log(f"Couldn't replace data.win ({e}) - close the game if it's running and run /patch again. "
+            f"Your correctly-patched file is saved at {patched_path} in the meantime.")
+        return
+
+    if not _is_data_win_patched(live_data_win):
+        log("Copied the patched file, but the live data.win still doesn't look patched - "
+            "something (antivirus, another process) may have interfered. Please report this.")
+        return
+
     os.remove(patched_path)
     log("data.win patched successfully! Fully close and restart the game for the changes to take effect.")
 
