@@ -1150,28 +1150,58 @@ string drawHudCombined = drawHudOriginal.TrimEnd() + "\n" + drawHudBlock;
 // data - no alarm/async round-trip involved. Reused as-is (not through
 // scr_LoadData) at the two arrow-switch sites below for the same reason.
 string apSyncSvReloadBlock = @"
-        var _apSvBuf = -1;
-        if (file_exists(""NUBBY_Progression_F.save""))
+        // V60 FIX: wrapped in try/catch. This runs synchronous file I/O +
+        // JSON parsing (buffer_load/json_parse) at 3 different call sites -
+        // obj_SupervisorMGMT_Create_0 (every time the supervisor screen
+        // opens), the two arrow-switch buttons, and a ~3s periodic refresh
+        // in obj_ItemMGMT_Step_0 - and every guard here (file_exists,
+        // string_length, array_length, variable_struct_exists) protects
+        // against the save being ABSENT or EMPTY, but nothing protected
+        // against it being present-but-MID-WRITE: if this reads
+        // NUBBY_Progression_F.save at the exact moment the game's own
+        // async save system (obj_Saver) is writing it - plausible right
+        // after a mode-select transition, which can itself trigger a save -
+        // buffer_read can return a truncated/partial string, and json_parse
+        // on malformed JSON throws. An uncaught throw here aborts the WHOLE
+        // enclosing event, including obj_SupervisorMGMT_Create_0's own
+        // vanilla code that runs after this block - which would surface as
+        // an ""SVCost not set"" crash even though SVCost itself was already
+        // correctly assigned earlier in the same event, because none of the
+        // code after the throw (including the vanilla read of SVCost)
+        // ever got to run this time. A real report matches this exactly:
+        // the fix was independently re-verified correct and present via a
+        // fresh decompile of the exact shipped build, so a transient
+        // exception aborting this block was the most plausible remaining
+        // explanation. This can never crash anything again regardless of
+        // save-file state now - at worst it skips this one refresh.
+        try
         {
-            _apSvBuf = buffer_load(""NUBBY_Progression_F.save"");
-            var _apSvStr = buffer_read(_apSvBuf, buffer_string);
-            buffer_delete(_apSvBuf);
-            if (string_length(_apSvStr) > 0)
+            var _apSvBuf = -1;
+            if (file_exists(""NUBBY_Progression_F.save""))
             {
-                var _apSvArr = json_parse(_apSvStr);
-                if (array_length(_apSvArr) > 0)
+                _apSvBuf = buffer_load(""NUBBY_Progression_F.save"");
+                var _apSvStr = buffer_read(_apSvBuf, buffer_string);
+                buffer_delete(_apSvBuf);
+                if (string_length(_apSvStr) > 0)
                 {
-                    var _apSvVal = _apSvArr[0];
-                    for (var _apSvI = 0; _apSvI <= 12; _apSvI += 1)
+                    var _apSvArr = json_parse(_apSvStr);
+                    if (array_length(_apSvArr) > 0)
                     {
-                        var _apSvField = ""SaveU_SV"" + string(_apSvI);
-                        if (variable_struct_exists(_apSvVal, _apSvField))
+                        var _apSvVal = _apSvArr[0];
+                        for (var _apSvI = 0; _apSvI <= 12; _apSvI += 1)
                         {
-                            obj_GAME.U_SV[_apSvI] = variable_struct_get(_apSvVal, _apSvField);
+                            var _apSvField = ""SaveU_SV"" + string(_apSvI);
+                            if (variable_struct_exists(_apSvVal, _apSvField))
+                            {
+                                obj_GAME.U_SV[_apSvI] = variable_struct_get(_apSvVal, _apSvField);
+                            }
                         }
                     }
                 }
             }
+        }
+        catch (_apSvErr)
+        {
         }
 ";
 string supervisorMgmtPath = Path.Combine(decompFolder, "gml_Object_obj_SupervisorMGMT_Create_0.gml");
