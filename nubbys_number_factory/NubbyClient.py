@@ -786,14 +786,14 @@ def activate_room_save(server_address, seed_name, slot_name, slot_data=None):
 
     if switching_rooms:
         # A genuinely different room's history shouldn't linger in the
-        # in-game check log - but a same-room reconnect (the else branch
-        # below) leaves it alone, since that's just a network blip. Wrapped
-        # on its own: this is display-only housekeeping, and a failure here
-        # (e.g. a transient Windows file-lock if the game happens to have
-        # the file open for reading at this exact instant) must never abort
-        # the rest of this function - everything below it, including the
-        # item/perk-pool file writes the whole shop depends on, is far more
-        # important than clearing a log.
+        # in-game check log - but a same-room reconnect (the final else
+        # branch below) leaves it alone, since that's just a network blip.
+        # Wrapped on its own: this is display-only housekeeping, and a
+        # failure here (e.g. a transient Windows file-lock if the game
+        # happens to have the file open for reading at this exact instant)
+        # must never abort the rest of this function - everything below it,
+        # including the item/perk-pool file writes the whole shop depends
+        # on, is far more important than clearing a log.
         try:
             if os.path.exists(AP_LOG_FILE):
                 os.remove(AP_LOG_FILE)
@@ -803,19 +803,37 @@ def activate_room_save(server_address, seed_name, slot_name, slot_data=None):
         if previous_room_dir and os.path.isdir(previous_room_dir):
             _copy_save_files(SAVE_DIR, os.path.join(previous_room_dir, "save"))
 
-        if is_new_room:
-            _copy_save_files(VANILLA_DIR, room_save_dir)
-            _lock_progression_for_fresh_room(room_save_dir, lock_challenges=bool(slot_data.get("lock_challenges")))
-            _write_json(os.path.join(room_dir, "manifest.json"), manifest)
-            # See _zeroed_progress_baseline's docstring - closes the
-            # cold-start race where rapid early progress could otherwise
-            # get silently absorbed into progress_watcher's first-tick
-            # baseline instead of being detected and sent.
-            _write_json(os.path.join(room_dir, "progress_baseline.json"), _zeroed_progress_baseline())
-            print(f"[NubbyAP] New AP room -> created isolated, freshly-locked save slot at {room_dir}")
-        else:
-            print(f"[NubbyAP] Switching to known AP room -> restoring save slot at {room_dir}")
-
+    # V60 FIX: this used to live inside "if switching_rooms:" above, so a
+    # brand new room only ever got vanilla-copied/locked/baseline-zeroed if
+    # this connection ALSO looked like a room switch. But switching_rooms is
+    # just "does active_room.json already point at this room_dir" - if an
+    # earlier connection attempt got interrupted right after writing that
+    # file but before finishing room setup (a crash, a flaky reconnect), the
+    # NEXT attempt sees previous_room_dir == room_dir, switching_rooms comes
+    # out False, and this whole block got skipped entirely: the player's
+    # current (unlocked, already-progressed) live save got copied straight
+    # into the "new" room's slot via the old final "else" branch below,
+    # completely unlocked. A real report matched this exactly - supervisor 0
+    # (always supposed to be force-locked, never obtainable through AP) was
+    # unlocked, and every restock/round milestone the player's real save had
+    # already passed was pre-marked done, so none of those checks could ever
+    # be detected as newly achieved - matching "only receiving checks, never
+    # sending any" for that whole category. is_new_room (does the room's own
+    # save/ folder exist on disk) is independent of switching_rooms and is
+    # the only condition that should gate fresh-room setup.
+    if is_new_room:
+        _copy_save_files(VANILLA_DIR, room_save_dir)
+        _lock_progression_for_fresh_room(room_save_dir, lock_challenges=bool(slot_data.get("lock_challenges")))
+        _write_json(os.path.join(room_dir, "manifest.json"), manifest)
+        # See _zeroed_progress_baseline's docstring - closes the
+        # cold-start race where rapid early progress could otherwise
+        # get silently absorbed into progress_watcher's first-tick
+        # baseline instead of being detected and sent.
+        _write_json(os.path.join(room_dir, "progress_baseline.json"), _zeroed_progress_baseline())
+        print(f"[NubbyAP] New AP room -> created isolated, freshly-locked save slot at {room_dir}")
+        _copy_save_files(room_save_dir, SAVE_DIR)
+    elif switching_rooms:
+        print(f"[NubbyAP] Switching to known AP room -> restoring save slot at {room_dir}")
         _copy_save_files(room_save_dir, SAVE_DIR)
     else:
         # Same room reconnecting (e.g. a network blip) - the live save is
